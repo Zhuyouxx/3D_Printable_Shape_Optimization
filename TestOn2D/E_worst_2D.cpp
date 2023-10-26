@@ -261,8 +261,8 @@ SparseMatrix<double> Build_N(int nv, int nbp, int* Boundary_Pid, double* Normals
 
 int main() {
 
-    char* filename = (char*)"../IO/test_01.mesh";
-    char* Stress = (char*)"../Results/Eworst_stress_test_01.txt";
+    char* filename = (char*)"../IO/test_00.mesh";
+    char* Stress = (char*)"../Results/Eworst_stress_test_00.txt";
 
     MMG5_pSol       mmgSol;
     MMG5_int        k, np, nt, nbe, noe, ne;

@@ -1,11 +1,9 @@
 /*
-* EP：没有使用GEP，仅仅求解EP，且使用的是p的基向量矩阵，也就是说是P=HH_T
-* 为什么解不为0，是因为：
-* f的能正确求解应该是：f = NPp
-* 而这份代码直接求解了：f=Np，故而f不为0，甚至模长为1
-* 
+* GEP：使用了Eigen的库求解了GEP
+* PS:但是Eigen的GEP是不是只能算Dense Matrix？好像没有给Sparse Matrix的口，所以我稀疏矩阵转成dense了再算的。
+* 另外这里用的 P=HH_T，也就是说用的是p的基向量矩阵
+*
 */
-
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -22,16 +20,10 @@
 #include <Eigen/Eigenvalues>
 #include <Eigen/IterativeLinearSolvers>
 #include <Eigen/SparseCholesky>
-#include <Spectra/SymGEigsSolver.h>
-#include <Spectra/MatOp/DenseSymMatProd.h>
-#include <Spectra/MatOp/SparseCholesky.h>
-#include <Spectra/MatOp/SparseSymMatProd.h>
-#include <Spectra/SymEigsSolver.h>
-#include <Spectra/MatOp/SparseRegularInverse.h>
 #include <chrono>
 using namespace std;
 using namespace Eigen;
-using namespace Spectra;
+//using namespace Spectra;
 
 #include "mmg/mmg2d/libmmg2d.h"
 typedef Eigen::Matrix< double, Dynamic, Dynamic> MatrixXd;
@@ -196,7 +188,8 @@ Eigen::SparseMatrix<double> Calculate_Stresses_face(int nv, double* vertices, in
     }
     return sparse_Stress;
 }
-//Build Sum Matrix G
+
+
 SparseMatrix<double> Build_G(int nv, double* vertices, SparseMatrix<double> N, double* center) {
     Eigen::SparseMatrix<double> G(3, nv * 2);
     for (int k = 0; k < nv; k++) {
@@ -208,7 +201,6 @@ SparseMatrix<double> Build_G(int nv, double* vertices, SparseMatrix<double> N, d
     G = G * N;
     return G;
 }
-//Build Normal Matrix N
 SparseMatrix<double> Build_N(int nv, int nbp, int* Boundary_Pid, double* Normals) {
     Eigen::SparseMatrix<double> N(nv * 2, nbp);
     for (int k = 0; k < nbp; k++) {
@@ -234,7 +226,7 @@ int main() {
     MMG5_pMesh mmgMesh = ReadFromMesh(filename, points, triangles, Normals, Boundary_Pid, center);
     MMG2D_Get_meshSize(mmgMesh, &np, &nt, NULL, &nbe);
     cout << "Number of Boundary:" << nbe << endl;
-    //start time
+
     auto start_time = std::chrono::high_resolution_clock::now();
 
     //build Stiffness Matrix
@@ -242,147 +234,70 @@ int main() {
     Eigen::SparseMatrix<double> G = Build_G(np, points, N, center);
     Eigen::SparseMatrix<double> K = Build_stiffness_Matrix(np, points, nt, triangles);
 
+    Eigen::SparseMatrix<double> I(nbe, nbe);
+    for (int i = 0; i < nbe; i++) {
+        I.insert(i, i) = 1.0;
+    }
+    Eigen::MatrixXd GGT = G * G.transpose();
+    Eigen::MatrixXd GGT_inverse = GGT.inverse();
+    Eigen::SparseMatrix<double> sparse_GGT_inverse = GGT_inverse.sparseView();
+    Eigen::MatrixXd A = (I - G.transpose() * (sparse_GGT_inverse)*G) * N.transpose()
+        * K *
+        N * (I - G.transpose() * (sparse_GGT_inverse)*G);
+    Eigen::MatrixXd B = (I - G.transpose() * (sparse_GGT_inverse)*G);
+    Eigen::GeneralizedEigenSolver<Eigen::MatrixXd> solver(A, B);
 
-    // 定义矩阵-向量乘法操作
-    //构造矩阵B，但是由于spectra要求B为正定矩阵，所以没用到
-    class MySparseMatrixOpB {
-    public:
-        using Scalar = double;
-    private:
-        Eigen::SparseMatrix<double> N;  
-        Eigen::SparseMatrix<double> G;  
-        int nbe;
-        int np;
-        using Index = Eigen::Index;
-        using Vector = Eigen::Matrix<Scalar, Eigen::Dynamic, 1>;
-        using MapConstVec = Eigen::Map<const Vector>;
-        using MapVec = Eigen::Map<Vector>;
-        mutable CompInfo m_info;
-        Eigen::ConjugateGradient<Eigen::SparseMatrix<double>> m_cg;
+    solver.compute(A, B);
+    Eigen::VectorXd min_eigenvector;
+    if (solver.info() == Eigen::Success) {
+        cout << "The (complex) numerators of the generalzied eigenvalues are: " << solver.alphas().transpose() << endl;
+        cout << "The (real) denominatore of the generalzied eigenvalues are: " << solver.betas().transpose() << endl;
+        cout << "The (complex) generalzied eigenvalues are (alphas./beta): " << solver.eigenvalues().real().transpose() << endl;
 
-    public:
-        using Scalar = double;  // A typedef named "Scalar" is required
-        int rows() const { return nbe; }
-        int cols() const { return nbe; }
-        // y_out = M * x_in
-        // Constructor to initialize your sparse matrices
-        MySparseMatrixOpB() {};
-        MySparseMatrixOpB(const Eigen::SparseMatrix<double>& inputMatrixA,
-            const Eigen::SparseMatrix<double>& inputMatrixB, int NumberOfBoundary, int NumberOfPoints)
-            : N(inputMatrixA), G(inputMatrixB), nbe(NumberOfBoundary), np(NumberOfPoints) {
-            Eigen::MatrixXd GGT = G * G.transpose();
-            Eigen::MatrixXd GGT_inverse = GGT.inverse();
-            Eigen::SparseMatrix<double> sparse_GGT_inverse = GGT_inverse.sparseView();
-            Eigen::SparseMatrix<double> I(nbe, nbe);
-            for (int i = 0; i < nbe; i++) {
-                I.insert(i, i) = 1.0;
-            }
-            m_cg.compute((I - G.transpose() * (sparse_GGT_inverse)*G));
+        //算最小特征值和对应的特征向量
+        Eigen::VectorXd all_eigenvalues = solver.eigenvalues().real(); // 考虑实部，因为特征值可能是复数
+        Eigen::Index min_index;  // 用于存储最小特征值的索引
+        double min_eigenvalue = all_eigenvalues.minCoeff(&min_index);
 
-        }
+        min_eigenvector = solver.eigenvectors().col(min_index).real();  // 考虑实部
 
-        void solve(const double* x_in, double* y_out) const
-        {
-            Eigen::Map<const Vector> x(x_in, N.cols());
-            MapVec y(y_out, N.cols());
+        std::cout << "The minimum eigenvalue of the generalized eigenvalue problem is:\n";
+        std::cout << min_eigenvalue << std::endl;
 
-            y.noalias() = m_cg.solve(x);
+        std::cout << "The corresponding eigenvector is:\n";
+        std::cout << min_eigenvector << std::endl;
 
-            m_info = (m_cg.info() == Eigen::Success) ?
-                CompInfo::Successful :
-                CompInfo::NotConverging;
-            if (m_info != CompInfo::Successful)
-                throw std::runtime_error("SparseRegularInverse: CG solver does not converge");
-        }
-        // Define the multiplication operation
-        void perform_op(const double* x_in, double* y_out)const {
-            Eigen::VectorXd x = Eigen::Map<const Eigen::VectorXd>(x_in, N.cols());
-            Eigen::SparseMatrix<double> I(nbe, nbe);
-            for (int i = 0; i < nbe; i++) {
-                I.insert(i, i) = 1.0;
-            }
-            Eigen::MatrixXd GGT = G * G.transpose();
-            Eigen::MatrixXd GGT_inverse = GGT.inverse();
-            Eigen::SparseMatrix<double> sparse_GGT_inverse = GGT_inverse.sparseView();
-            Eigen::VectorXd y = (I - G.transpose() * (sparse_GGT_inverse)*G) * x;  // Example operation: first multiply with B, then with A
-            std::copy(y.data(), y.data() + y.size(), y_out);
-        }
-    };
-    //构造矩阵A
-    class MySparseMatrixOpA {
-    private:
-        Eigen::SparseMatrix<double> N;
-        Eigen::SparseMatrix<double> G;
-        Eigen::SparseMatrix<double> K;
-        int nbe;
-        int np;
-
-    public:
-        using Scalar = double;  // A typedef named "Scalar" is required
-        int rows() const { return nbe; }
-        int cols() const { return nbe; }
-        // y_out = M * x_in
-        // Constructor to initialize your sparse matrices
-        MySparseMatrixOpA() {};
-        MySparseMatrixOpA(const Eigen::SparseMatrix<double>& Stiffness_Matrix,
-            const Eigen::SparseMatrix<double>& inputMatrixA,
-            const Eigen::SparseMatrix<double>& inputMatrixB, int NumberOfBoundary, int NumberOfPoints)
-            :K(Stiffness_Matrix), N(inputMatrixA), G(inputMatrixB), nbe(NumberOfBoundary), np(NumberOfPoints) {}
-        // Define the multiplication operation
-        void perform_op(const double* x_in, double* y_out)const {
-            Eigen::VectorXd x = Eigen::Map<const Eigen::VectorXd>(x_in, N.cols());
-            Eigen::SparseMatrix<double> I(nbe, nbe);
-            for (int i = 0; i < nbe; i++) {
-                I.insert(i, i) = 1.0;
-            }
-            Eigen::MatrixXd GGT = G * G.transpose();
-            Eigen::MatrixXd GGT_inverse = GGT.inverse();
-            Eigen::SparseMatrix<double> sparse_GGT_inverse = GGT_inverse.sparseView();
-            Eigen::VectorXd y = (I - G.transpose() * (sparse_GGT_inverse)*G) *
-                N.transpose() * K * N *
-                (I - G.transpose() * (sparse_GGT_inverse)*G) * x;
-            std::copy(y.data(), y.data() + y.size(), y_out);
-        }
-    };
-
-    MySparseMatrixOpA opA(K, N, G, nbe, np);
-    //MySparseMatrixOpB opB(N,G,nbe, np);
-    SymEigsSolver<MySparseMatrixOpA> eigs(opA, 1, 6);
-    //SymGEigsSolver<MySparseMatrixOpA, MySparseMatrixOpB, GEigsMode::RegularInverse>
-    //    eigs(opA, opB, 3, 6);
-    eigs.init();
-    eigs.compute(SortRule::SmallestAlge);
-    Eigen::MatrixXd evecs;
-    Eigen::VectorXd evalues;
-    if (eigs.info() == CompInfo::Successful)
-    {
-        evalues = eigs.eigenvalues();
-        evecs = eigs.eigenvectors();
-        std::cout << "Eigenvalues found:\n" << evalues << std::endl;
     }
     else {
-        cout << "The Eigenvalues were not found.Error:NotConvergence" << endl;
-        return 0;
+        std::cout << "The eigenvalue computation did not convergence." << std::endl;
     }
-    // calculate the time cost;
+
+    VectorXd pp = min_eigenvector;
+    cout << "模长(min_eigenvector)：" << pp.norm() << endl;
+    Eigen::VectorXd y = (I - G.transpose() * (sparse_GGT_inverse)*G) * pp;
+    cout << "y：" << y << endl;
+    cout << "模长(P * min_eigenvector)：" << y.norm() << endl;
+
+    /// ////////////////////////////////////////
+    //计算time cost
     auto end_time = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::seconds>(end_time - start_time).count();
     std::cout << "Time taken by function: " << duration << " seconds" << std::endl;
 
     //After calculate Eigenvalues,we'll calculate the stress;
     VectorXd u, f, p;
-    f = N * evecs.col(0);
-    Eigen::SparseLU<Eigen::SparseMatrix<double>> solver;
-    solver.compute(K);
-    if (solver.info() != Eigen::Success) {
+    f = N * y;
+    cout << "模长(f)：" << f.norm() << endl;
+    Eigen::SparseLU<Eigen::SparseMatrix<double>> solver_Kuf;
+    solver_Kuf.compute(K);
+    if (solver_Kuf.info() != Eigen::Success) {
         std::cerr << "Decomposition failed!" << std::endl;
         return -1;
     }
-    u = solver.solve(f);
+    u = solver_Kuf.solve(f);
     //cout << "Eigenvalues" << u << endl;
 
     SparseMatrix<double> Stress_face = Calculate_Stresses_face(np, points, nt, triangles, u);
-
     VectorXd S_face_points(nt);
     for (int k = 0; k < nt; k++) {
         double sigma_k = max(abs(Stress_face.coeff(3 * k, 0)), abs(Stress_face.coeff(3 * k + 1, 0)));

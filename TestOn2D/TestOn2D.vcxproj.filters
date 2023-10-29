@@ -15,7 +15,7 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="E_worst_2D.cpp">
+    <ClCompile Include="E_worst_EP_Pp.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
     <ClCompile Include="Remesh.cpp">

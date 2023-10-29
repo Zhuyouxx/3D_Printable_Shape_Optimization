@@ -1,0 +1,23 @@
+cmake_minimum_required(VERSION 3.2)
+
+project(3D_Printable_Shape_Optimization)
+
+# 添加C++11支持
+set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD_REQUIRED True)
+
+set(INCLUDE_DIR "D:/Env/Env_DR/include")
+set(EIGEN_INCLUDE_DIR "D:/Env/Env_DR/Include/Eigen")
+find_package(EIGEN REQUIRED)
+set(LIB_DIR "D:/Env/Env_DR/lib")
+
+include_directories(${PROJECT_SOURCE_DIR} ${EIGEN_INCLUDE_DIR } ${INCLUDE_DIR})
+link_directories(${LIB_DIR})
+
+set(SOURCES
+    Remesh.cpp
+    E_worst_2D.cpp
+)
+
+add_executable(${PROJECT_NAME} ${SOURCES})
+target_link_libraries(${PROJECT_NAME} ${(LIB_DIR} mmg mmg2d mmg3d mmgs)

@@ -1,0 +1,27 @@
+cmake_minimum_required(VERSION 3.2)
+
+project(3D_Printable_Shape_Optimization)
+
+set(INCLUDE_DIR "D:/Env/Env_DR/include")
+set(EIGEN_INCLUDE_DIR "D:/Env/Env_DR/Include/Eigen")
+set(LIB_DIR "D:/Env/Env_DR/lib")
+
+include_directories(${PROJECT_SOURCE_DIR} ${EIGEN_INCLUDE_DIR } ${INCLUDE_DIR})
+link_directories(${LIB_DIR})
+
+set(SOURCES
+    main.cpp
+    maths_funcs.cpp
+    universal.cpp
+    ThickeningRange.cpp
+    Evaluation.cpp
+    SelfIntersect.cpp
+    Deformation.cpp
+    Visibility.cpp
+    Saliency.cpp
+    MOSEKOptimize.cpp
+    ShellThickening.cpp
+    BayesianOptimization.cpp
+)
+
+add_executable(${PROJECT_NAME} ${SOURCES})

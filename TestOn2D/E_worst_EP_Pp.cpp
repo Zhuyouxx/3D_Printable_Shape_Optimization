@@ -1,3 +1,11 @@
+/*
+* EP：没有使用GEP，仅仅求解EP，且使用的是p的基向量矩阵，也就是说是Pp
+* 为什么解不为0，是因为：
+* f的能正确求解应该是：f = NPp
+* 而这份代码直接求解了：f=Np，故而f不为0，甚至模长为1
+* 
+*/
+
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -12,14 +20,14 @@
 #include <Eigen/SparseCore>
 #include <Eigen/Sparse>
 #include <Eigen/Eigenvalues>
+#include <Eigen/IterativeLinearSolvers>
+#include <Eigen/SparseCholesky>
 #include <Spectra/SymGEigsSolver.h>
 #include <Spectra/MatOp/DenseSymMatProd.h>
 #include <Spectra/MatOp/SparseCholesky.h>
 #include <Spectra/MatOp/SparseSymMatProd.h>
 #include <Spectra/SymEigsSolver.h>
 #include <Spectra/MatOp/SparseRegularInverse.h>
-#include <Eigen/IterativeLinearSolvers>
-#include <Eigen/SparseCholesky>
 #include <chrono>
 using namespace std;
 using namespace Eigen;
@@ -29,7 +37,7 @@ using namespace Spectra;
 typedef Eigen::Matrix< double, Dynamic, Dynamic> MatrixXd;
 double mu = 0.3;
 double E = 1e9;
-
+//read mesh use MMG
 MMG5_pMesh ReadFromMesh(char* filename, double*& points, int*& triangles, double*& normals, int*& boundary_Pid, double*& center) {
     MMG5_pMesh      mmgMesh;
     MMG5_int        k, np, nt, ne, noe;
@@ -96,6 +104,7 @@ MMG5_pMesh ReadFromMesh(char* filename, double*& points, int*& triangles, double
     boundary_Pid = Boundary_Pid;
     return mmgMesh;
 }
+//Build Stiffness Matrix-Sparse
 Eigen::SparseMatrix<double> Build_stiffness_Matrix(int nv, double* vertices, int nt, int* triangles) {
     Eigen::SparseMatrix<double> sparse_K(nv * 2, nv * 2);
     Eigen::Matrix<double, 3, 3>D;
@@ -140,56 +149,7 @@ Eigen::SparseMatrix<double> Build_stiffness_Matrix(int nv, double* vertices, int
     }
     return sparse_K;
 }
-Eigen::SparseMatrix<double> Calculate_Stresses(int nv, double* vertices, int nt, int* triangles, VectorXd u) {
-    Eigen::SparseMatrix<double> sparse_Stress(nv * 3, 1);
-    Eigen::Matrix<double, 3, 3>D;
-    Eigen::Matrix<double, 3, 6>B;
-    Eigen::Matrix<double, 3, 1>S_tress_e;
-    Eigen::Matrix<double, 6, 1>ue;
-    D << 1, mu, 0,
-        mu, 1, 0,
-        0, 0, (1 - mu) / 2;
-    D *= (E / (1 - mu * mu));
-    for (int k = 0; k < nt; k++) {
-        double p1_x, p1_y, p2_x, p2_y, p3_y, p3_x;
-        int t1, t2, t3;
-        double a1, a2, a3, b1, b2, b3, c1, c2, c3;
-        //double determinant = K.determinant()
-        Matrix<double, 3, 3> Area;
-        t1 = triangles[k * 3]; t2 = triangles[k * 3 + 1]; t3 = triangles[k * 3 + 2];
-        p1_x = vertices[t1 * 2]; p1_y = vertices[t1 * 2 + 1];
-        p2_x = vertices[t2 * 2]; p2_y = vertices[t2 * 2 + 1];
-        p3_x = vertices[t3 * 2]; p3_y = vertices[t3 * 2 + 1];
-        Area << 1, p1_x, p1_y,
-            1, p2_x, p2_y,
-            1, p3_x, p3_y;
-        double A = Area.determinant() / 2.0;
-
-        b1 = p2_y - p3_y;
-        b2 = p3_y - p1_y;
-        b3 = p1_y - p2_y;
-        c1 = p3_x - p2_x;
-        c2 = p1_x - p3_x;
-        c3 = p2_x - p1_x;
-        B << b1, 0, b2, 0, b3, 0,
-            0, c1, 0, c2, 0, c3,
-            c1, b1, c2, b2, c3, b3;
-        B /= (2.0 * A);
-        ue << u[t1 * 2], u[t1 * 2 + 1], u[t2 * 2], u[t2 * 2 + 1], u[t3 * 2], u[t3 * 2 + 1];
-        S_tress_e = D * B * ue;
-
-        //int index[] = { 2 * t1,2 * t1 + 1,2 * t2,2 * t2 + 1,2 * t3,2 * t3 + 1 };
-        int index[] = { t1,t2,t3 };
-        for (int i = 0; i < 3; i++) {
-            sparse_Stress.coeffRef(3 * index[i], 0) += S_tress_e(0, 0);
-            sparse_Stress.coeffRef(3 * index[i] + 1, 0) += S_tress_e(1, 0);
-            sparse_Stress.coeffRef(3 * index[i] + 2, 0) += 1;
-
-        }
-    }
-    return sparse_Stress;
-}
-
+//After solving EigenValues p/f,and get the displacement u,we calculate stress use the parameters u;
 Eigen::SparseMatrix<double> Calculate_Stresses_face(int nv, double* vertices, int nt, int* triangles, VectorXd u) {
     Eigen::SparseMatrix<double> sparse_Stress(nt * 3, 1);
     Eigen::Matrix<double, 3, 3>D;
@@ -236,8 +196,7 @@ Eigen::SparseMatrix<double> Calculate_Stresses_face(int nv, double* vertices, in
     }
     return sparse_Stress;
 }
-
-
+//Build Sum Matrix G
 SparseMatrix<double> Build_G(int nv, double* vertices, SparseMatrix<double> N, double* center) {
     Eigen::SparseMatrix<double> G(3, nv * 2);
     for (int k = 0; k < nv; k++) {
@@ -249,6 +208,7 @@ SparseMatrix<double> Build_G(int nv, double* vertices, SparseMatrix<double> N, d
     G = G * N;
     return G;
 }
+//Build Normal Matrix N
 SparseMatrix<double> Build_N(int nv, int nbp, int* Boundary_Pid, double* Normals) {
     Eigen::SparseMatrix<double> N(nv * 2, nbp);
     for (int k = 0; k < nbp; k++) {
@@ -260,7 +220,7 @@ SparseMatrix<double> Build_N(int nv, int nbp, int* Boundary_Pid, double* Normals
 }
 
 int main() {
-
+    //read mesh
     char* filename = (char*)"../IO/test_00.mesh";
     char* Stress = (char*)"../Results/Eworst_stress_test_00.txt";
 
@@ -274,20 +234,23 @@ int main() {
     MMG5_pMesh mmgMesh = ReadFromMesh(filename, points, triangles, Normals, Boundary_Pid, center);
     MMG2D_Get_meshSize(mmgMesh, &np, &nt, NULL, &nbe);
     cout << "Number of Boundary:" << nbe << endl;
-
+    //start time
     auto start_time = std::chrono::high_resolution_clock::now();
 
     //build Stiffness Matrix
     Eigen::SparseMatrix<double> N = Build_N(np, nbe, Boundary_Pid, Normals);
     Eigen::SparseMatrix<double> G = Build_G(np, points, N, center);
     Eigen::SparseMatrix<double> K = Build_stiffness_Matrix(np, points, nt, triangles);
+
+
     // 定义矩阵-向量乘法操作
+    //构造矩阵B，但是由于spectra要求B为正定矩阵，所以没用到
     class MySparseMatrixOpB {
     public:
         using Scalar = double;
     private:
-        Eigen::SparseMatrix<double> N;  // Your first sparse matrix
-        Eigen::SparseMatrix<double> G;  // Your second sparse matrix
+        Eigen::SparseMatrix<double> N;  
+        Eigen::SparseMatrix<double> G;  
         int nbe;
         int np;
         using Index = Eigen::Index;
@@ -345,7 +308,7 @@ int main() {
             std::copy(y.data(), y.data() + y.size(), y_out);
         }
     };
-
+    //构造矩阵A
     class MySparseMatrixOpA {
     private:
         Eigen::SparseMatrix<double> N;
@@ -401,16 +364,12 @@ int main() {
         cout << "The Eigenvalues were not found.Error:NotConvergence" << endl;
         return 0;
     }
-    int n = 3;
-
+    // calculate the time cost;
     auto end_time = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::seconds>(end_time - start_time).count();
     std::cout << "Time taken by function: " << duration << " seconds" << std::endl;
 
-    // Construct generalized eigen solver object, requesting the largest three generalized eigenvalues
-    //SymGEigsSolver<MySparseMatrixOpA, MySparseMatrixOpB, GEigsMode::RegularInverse>
-    //    geigs(opA, opB, 3, 6);
-
+    //After calculate Eigenvalues,we'll calculate the stress;
     VectorXd u, f, p;
     f = N * evecs.col(0);
     Eigen::SparseLU<Eigen::SparseMatrix<double>> solver;
@@ -420,30 +379,15 @@ int main() {
         return -1;
     }
     u = solver.solve(f);
-    cout << "Eigenvalues" << u << endl;
+    //cout << "Eigenvalues" << u << endl;
 
-
-    VectorXd E_points(np);
-    ///// /////////写在每个面片上
     SparseMatrix<double> Stress_face = Calculate_Stresses_face(np, points, nt, triangles, u);
-    end_time = std::chrono::high_resolution_clock::now();
-    duration = std::chrono::duration_cast<std::chrono::seconds>(end_time - start_time).count();
-    std::cout << "Time taken by function: " << duration << " seconds" << std::endl;
-    double maxvalue = -1;
-    int index = -1;
+
     VectorXd S_face_points(nt);
     for (int k = 0; k < nt; k++) {
         double sigma_k = max(abs(Stress_face.coeff(3 * k, 0)), abs(Stress_face.coeff(3 * k + 1, 0)));
-
-        if (sigma_k > maxvalue) {
-            maxvalue = sigma_k;
-            index = k;
-        }
         S_face_points(k) = sigma_k;
     }
-    std::cout << index << endl;
-    std::cout << points[index * 2] << " " << points[index * 2 + 1] << endl;
-
 
     FILE* inm_stress_face;
     if (!(inm_stress_face = fopen(Stress, "w"))) {

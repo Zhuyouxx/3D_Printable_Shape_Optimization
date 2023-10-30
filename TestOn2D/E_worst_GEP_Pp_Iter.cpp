@@ -253,7 +253,7 @@ int main() {
     bool Convergence = false;
     const int maxIter = 1000;
     const double tol = 1e-6;
-    double lambda_old = 0.0, lambda_new = 0.0;
+    double lambda = 0.0;
     for (int i = 0; i < maxIter; ++i) {
         y = B * x;
         w = solver.solve(y);
@@ -262,18 +262,14 @@ int main() {
             return -1;
         }
         x = w.normalized();
-        double a = (x.transpose() * A * x);
-        double b = (x.transpose() * B * x);
-        lambda_new = static_cast<double>(x.transpose() * A * x) / (x.transpose() * B * x);
-        double minus = abs(lambda_new - lambda_old);
-        if (std::abs(a - b) < tol) {
+        lambda = static_cast<double>(x.transpose() * A * x) / (x.transpose() * B * x);
+        if ((A * x - (x.dot(A * x) / x.dot(B * x)) * B * x).norm() < tol) {
             Convergence = true;
             break;
         }
-        lambda_old = lambda_new;
     }
     if (Convergence) {
-        std::cout << "Estimated eigenvalue: " << lambda_new << std::endl;
+        std::cout << "Estimated eigenvalue: " << lambda << std::endl;
     }
     else {
         std::cout << "NotConvergence!" << endl;

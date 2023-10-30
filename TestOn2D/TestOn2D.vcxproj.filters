@@ -27,5 +27,8 @@
     <ClCompile Include="E_worst_K_inverse.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
+    <ClCompile Include="E_worst_GEP_Pp_Iter.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
   </ItemGroup>
 </Project>

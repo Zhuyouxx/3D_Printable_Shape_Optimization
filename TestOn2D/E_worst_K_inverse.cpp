@@ -227,7 +227,7 @@ int main() {
     double* center;
     MMG5_pMesh mmgMesh = ReadFromMesh(filename, points, triangles, Normals, Boundary_Pid, center);
     MMG2D_Get_meshSize(mmgMesh, &np, &nt, NULL, &nbe);
-
+    auto start_time = std::chrono::high_resolution_clock::now();
     //build Stiffness Matrix
     MatrixXd K = Build_stiffness_Matrix(np, points, nt, triangles);
     Eigen::MatrixXd K_inverse = K.inverse();
@@ -268,8 +268,11 @@ int main() {
         return -1;
     }
     VectorXd u = solver_Kuf.solve(f);
-    cout << "Eigenvalues" << u << endl;
-    
+    //cout << "Eigenvalues" << u << endl;
+    //¼ÆËãtime cost
+    auto end_time = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::seconds>(end_time - start_time).count();
+    std::cout << "Time taken by function: " << duration << " seconds" << std::endl;
 
     SparseMatrix<double> Stress_face = Calculate_Stresses_face(np, points, nt, triangles, u);
     VectorXd S_face_points(nt);

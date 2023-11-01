@@ -147,9 +147,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="E_worst_EP_Pp.cpp" />
     <ClCompile Include="E_worst_GEP_Pp.cpp" />
-    <ClCompile Include="E_worst_GEP_Pp_Iter.cpp" />
     <ClCompile Include="E_worst_K_inverse.cpp" />
     <ClCompile Include="Remesh.cpp" />
   </ItemGroup>

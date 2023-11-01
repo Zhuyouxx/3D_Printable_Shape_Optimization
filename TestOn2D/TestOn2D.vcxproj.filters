@@ -15,19 +15,13 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="E_worst_EP_Pp.cpp">
-      <Filter>源文件</Filter>
-    </ClCompile>
     <ClCompile Include="Remesh.cpp">
-      <Filter>源文件</Filter>
-    </ClCompile>
-    <ClCompile Include="E_worst_GEP_Pp.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
     <ClCompile Include="E_worst_K_inverse.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
-    <ClCompile Include="E_worst_GEP_Pp_Iter.cpp">
+    <ClCompile Include="E_worst_GEP_Pp.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
   </ItemGroup>

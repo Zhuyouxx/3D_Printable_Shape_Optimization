@@ -211,8 +211,8 @@ SparseMatrix<double> Build_N(int nv, int nbp, int* Boundary_Pid, double* Normals
 
 int main() {
     //read mesh
-    char* filename = (char*)"../IO/test_00.mesh";
-    char* File_Stress = (char*)"../Results/Eworst_stress_test_00.txt";
+    char* filename = (char*)"../IO/test_05.mesh";
+    char* File_Stress = (char*)"../Results/Eworst_stress_test_05.txt";
 
     MMG5_pSol       mmgSol;
     MMG5_int        k, np, nt, nbe, noe, ne;
@@ -278,9 +278,9 @@ int main() {
     /// ////////////////////////////////////////
     VectorXd pp = x;
     cout << "模长(min_eigenvector)：" << pp.norm() << endl;
-    Eigen::VectorXd y = (I - G.transpose() * (sparse_GGT_inverse)*G) * pp;
+    Eigen::VectorXd Pp = (I - G.transpose() * (sparse_GGT_inverse)*G) * pp;
     //cout << "y：" << y << endl;
-    cout << "模长(P * min_eigenvector)：" << y.norm() << endl;
+    cout << "模长(P * min_eigenvector)：" << Pp.norm() << endl;
 
     /// ////////////////////////////////////////
     //计算time cost
@@ -290,8 +290,8 @@ int main() {
 
     //After calculate Eigenvalues,we'll calculate the stress;
     VectorXd u, f, p;
-    y = y / y.norm();
-    f = N * y;
+    Pp = Pp / Pp.norm();
+    f = N * Pp;
     cout << "模长(f)：" << f.norm() << endl;
     Eigen::SparseLU<Eigen::SparseMatrix<double>> solver_Kuf;
     solver_Kuf.compute(K);

@@ -1,6 +1,6 @@
 /*
 * GEP：使用了Eigen的库求解了GEP
-* PS:但是Eigen的GEP是不是只能算Dense Matrix？好像没有给Sparse Matrix的口，所以我稀疏矩阵转成dense了再算的。
+* PS:但是Eigen的GEP是不是只能算Dense Matrix,好像没有给Sparse Matrix的口，所以我稀疏矩阵转成dense了再算的。
 * 另外这里用的 P=HH_T，也就是说用的是p的基向量矩阵
 *
 */
@@ -286,6 +286,7 @@ int main() {
 
     //After calculate Eigenvalues,we'll calculate the stress;
     VectorXd u, f, p;
+    y = y / y.norm();
     f = N * y;
     cout << "模长(f)：" << f.norm() << endl;
     Eigen::SparseLU<Eigen::SparseMatrix<double>> solver_Kuf;

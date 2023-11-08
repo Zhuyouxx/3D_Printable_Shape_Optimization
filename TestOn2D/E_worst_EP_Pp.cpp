@@ -372,13 +372,23 @@ int main() {
     //After calculate Eigenvalues,we'll calculate the stress;
     VectorXd u, f, p;
     f = N * evecs.col(0);
-    Eigen::SparseLU<Eigen::SparseMatrix<double>> solver;
+
+    //同样的，我们换了一个求解器
+    /*Eigen::SparseLU<Eigen::SparseMatrix<double>> solver;
     solver.compute(K);
     if (solver.info() != Eigen::Success) {
         std::cerr << "Decomposition failed!" << std::endl;
         return -1;
     }
-    u = solver.solve(f);
+    u = solver.solve(f);*/
+    LeastSquaresConjugateGradient<SparseMatrix<double> > lscg;
+    lscg.compute(K);
+    u = lscg.solve(f);
+
+    std::cout << "The solution is:\n" << u << std::endl;
+    std::cout << "The norm is:\n" << u.norm() << std::endl;
+    std::cout << "#iterations:     " << lscg.iterations() << std::endl;
+    std::cout << "estimated error: " << lscg.error() << std::endl;
     //cout << "Eigenvalues" << u << endl;
 
     SparseMatrix<double> Stress_face = Calculate_Stresses_face(np, points, nt, triangles, u);

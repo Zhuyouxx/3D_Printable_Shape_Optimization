@@ -260,14 +260,25 @@ int main() {
 
     //std::cout << "Eigenvalues found:\n" << evalues << std::endl;
 
-    Eigen::SparseLU<Eigen::SparseMatrix<double>> solver_Kuf;
+    //这里我们不再使用sparseLU了，因为给到的数值并不准确，不如最小二乘法共轭
+   /* Eigen::SparseLU<Eigen::SparseMatrix<double>> solver_Kuf;
     Eigen::SparseMatrix<double> KK = K.sparseView();
     solver_Kuf.compute(KK);
     if (solver_Kuf.info() != Eigen::Success) {
         std::cerr << "Decomposition failed!" << std::endl;
         return -1;
     }
-    VectorXd u = solver_Kuf.solve(f);
+    VectorXd u = solver_Kuf.solve(f);*/
+
+    Eigen::SparseMatrix<double> KK = K.sparseView();
+    LeastSquaresConjugateGradient<SparseMatrix<double> > lscg;
+    lscg.compute(KK);
+    VectorXd u = lscg.solve(f);
+    std::cout << "The solution is:\n" << u << std::endl;
+    std::cout << "The norm is:\n" << u.norm() << std::endl;
+    std::cout << "#iterations:     " << lscg.iterations() << std::endl;
+    std::cout << "estimated error: " << lscg.error() << std::endl;
+
     //cout << "Eigenvalues" << u << endl;
     //计算time cost
     auto end_time = std::chrono::high_resolution_clock::now();

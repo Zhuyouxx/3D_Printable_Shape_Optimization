@@ -289,13 +289,16 @@ int main() {
     y = y / y.norm();
     f = N * y;
     cout << "Ä£³¤(f)£º" << f.norm() << endl;
-    Eigen::SparseLU<Eigen::SparseMatrix<double>> solver_Kuf;
+    /*Eigen::SparseLU<Eigen::SparseMatrix<double>> solver_Kuf;
     solver_Kuf.compute(K);
     if (solver_Kuf.info() != Eigen::Success) {
         std::cerr << "Decomposition failed!" << std::endl;
         return -1;
     }
-    u = solver_Kuf.solve(f);
+    u = solver_Kuf.solve(f);*/
+    LeastSquaresConjugateGradient<SparseMatrix<double> > lscg;
+    lscg.compute(K);
+    u = lscg.solve(f);
     //cout << "Eigenvalues" << u << endl;
 
     SparseMatrix<double> Stress_face = Calculate_Stresses_face(np, points, nt, triangles, u);

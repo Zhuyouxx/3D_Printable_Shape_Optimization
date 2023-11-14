@@ -27,5 +27,8 @@
     <ClCompile Include="E_worst_EP_Pp.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
+    <ClCompile Include="E_worst_EP_Pp_CppAD.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
   </ItemGroup>
 </Project>

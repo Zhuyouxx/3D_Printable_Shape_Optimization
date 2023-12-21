@@ -1120,23 +1120,18 @@ int main() {
             (I - G.transpose() * (sparse_GGT_inverse)*G) +
             G.transpose() * MaxEigenvalue * G
             );
-
-
         Eigen::SparseMatrix<double> A(n, n);
         for (int i = 0; i < np; i++) {
             A.insert(2 * i, 2 * i) = Area[i];
             A.insert(2 * i + 1, 2 * i + 1) = Area[i];
         }
-        Eigen::SparseMatrix<double> P = I - G.transpose() * (sparse_GGT_inverse)*G;
         Eigen::SparseMatrix<double> matrix_B = N.transpose() * A * N;
         SparseSymMatProd<double> opA(GEP_matrix_sparse);
         SparseCholesky<double>  Bop(matrix_B);
-
-        // Construct generalized eigen solver object, requesting the largest three generalized eigenvalues
         SymGEigsSolver<SparseSymMatProd<double>, SparseCholesky<double>, GEigsMode::Cholesky>
             geigs(opA, Bop, 3, 12);
 
-        // Initialize and compute
+        // Initialize and compute   GEP
         geigs.init();
         int nconv = geigs.compute(SortRule::SmallestAlge);
 
@@ -1152,44 +1147,31 @@ int main() {
 
         VectorXd p = evecs_GEP.col(2);
         VectorXd p_stress = evecs_GEP.col(2);
-        Eigen::VectorXd y = (I - G.transpose() * (sparse_GGT_inverse)*G) * p;
-        //cout << "y：" << y << endl;
-        std::cout << "模长(P * min_eigenvector)：" << y.norm() << endl;
-        VectorXd u, f;
-        VectorXd Gp = G * y;
-        std::cout << "GPp:" << Gp << endl;
-        Gp = G * p;
-        std::cout << "Gp:" << Gp << endl;
-        //f = N * p;
-        p = y;
-        f = N * p;
-        std::cout << "模长(f)：" << f.norm() << endl;
-
 
         //optimization
         bool loop = true, loop_t = true, loop_s = true;
         double* x = (double*)calloc(np * 2, sizeof(double));
         vector<CppAD::AD<double>> t(1);
         vector<double> t_x(1);
-        //points值赋给V和x
+
         for (size_t i = 0; i < np * 2; ++i) {
             x[i] = points[i]; // 
         }
         t[0] = 1e4; t_x[0] = 1e4;
         double threshold = 1e-5, gamma = 0.5;
-        //optimize t
+
+        //Initial test: feasible initial guess s,t
         CppAD::Independent(t);
         Eigen::SparseMatrix<double> sparse_Stress = Calculate_Stresses(np, nbe, Edges, points, nt, triangles, p_stress, solver_LU);
         CppAD::AD<double> O = Calculate_O(t[0], sparse_Stress, nt);
         if (O < -1e5) {
             std::cout << "Invalid Initial!!" << endl;
             loop = false;
+            throw std::runtime_error("The initial s,t are invalid!");
         }
         int iter = 0;
         CppAD::AD<double> last_O = O, last_O_t = O, last_O_s = O;
         std::vector<double> jac_O_t;
-
-        int loop_t_time = 0, loop_s_time = 0;
         double alpha = 0.001;
         while (loop) {
             iter++;
@@ -1231,24 +1213,12 @@ int main() {
                 }
                 cout << "O:" << O << " The max of O_t : " << maxVal << "  t : " << t_x[0] << " dt:" << (jac_O_t[0] / hess_O_t[0]) << " |Alpha:" << alpha_t << endl;
             }
+
             //optimize s
             cout << "-------------------Optimize s: ----------Optimize s: ----------------- Optimize s --------------------------------------------------" << endl;
             cout << "The value of O after optomization on t : " << last_O_t << endl;
-
             VectorXd grad_s;
             Calculate_Stresses_AD(np, nbe, Edges, points, nt, triangles, t_x[0], p_stress, grad_s, solver_LU);
-            {
-                std::ostringstream stream;
-                // 设置宽度为3，左侧填充0
-                stream << std::setw(3) << std::setfill('0') << count_time;
-                std::string grad_save_str = "Results/Grad_AD_" + model_name + "_" + stream.str() + ".txt";
-                char* grad_save = const_cast<char*>(grad_save_str.c_str());
-                if (!write_file(grad_save, grad_s, np)) {
-                    cout << "Save FAILED!" << endl;
-                    return -1;
-                }
-            }
-
             sparse_Stress = Calculate_Stresses(np, nbe, Edges, points, nt, triangles, p_stress, solver_LU);
             O = Calculate_O(t[0], sparse_Stress, nt);
             last_O_s = O;
@@ -1275,7 +1245,7 @@ int main() {
                 for (int i = 0; i < n; i++) {
                     points[i] = (x[i] + eps * direction[i]);
                 }
-                //After updating points,we need to update K,N,G->M,so we also need to rebuild a solver for new M.
+                //After updating points,we need to update K,N,G->M,so we need to rebuild a solver for new M.
                 K = Build_stiffness_Matrix(np, points, nt, triangles);
                 N = Build_N(np, nbe, Edges, points, Area);
                 G = Build_G(np, points, N);        //计算G
@@ -1303,14 +1273,13 @@ int main() {
             if (maxVal < threshold) { loop = false; break; }
             if (maxVal * alpha > 0.05) {
                 alpha *= gamma;
-                loop_s_time++;
                 continue;
             }
             while (true) {
                 for (int i = 0; i < n; i++) {
                     points[i] = x[i] - alpha * grad_s[i];
                 }
-                //After updating points,we need to update K,N,G->M,so we also need to rebuild a solver for new M.
+                //After updating points,we need to update K,N,G->M,so we need to rebuild a solver for new M.
                 K = Build_stiffness_Matrix(np, points, nt, triangles);
                 N = Build_N(np, nbe, Edges, points, Area);
                 G = Build_G(np, points, N);        //计算G

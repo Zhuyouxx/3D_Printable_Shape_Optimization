@@ -147,6 +147,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="Eworst_GEP_CPPad.cpp" />
     <ClCompile Include="E_worst_EP_Pp.cpp" />
     <ClCompile Include="E_worst_EP_Pp_CppAD.cpp" />
     <ClCompile Include="E_worst_GEP_Pp.cpp" />

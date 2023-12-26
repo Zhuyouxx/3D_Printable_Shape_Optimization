@@ -44,88 +44,11 @@ double E = 1.0; //double E = 1e9;
 double dt = 1e-6;
 double O_mu = 1e-3;
 int count_time = 0;
-
-
 void sortThreeInts(int& a, int& b, int& c) {
     if (a > b) std::swap(a, b);
     if (b > c) std::swap(b, c);
     if (a > b) std::swap(a, b);
 }
-int write_file(char* filename, double* points, int np) {
-    std::ofstream file(filename);
-
-    // 检查文件是否成功打开
-    if (!file.is_open()) {
-        std::cerr << "Failed to open file." << std::endl;
-        return 0;
-    }
-
-    // 遍历数组并写入每个点到文件
-    for (int i = 0; i < 2 * np; i++) {
-        file << points[i] << std::endl;
-    }
-
-    // 关闭文件流
-    file.close();
-    return 1;
-}
-int write_file(char* filename, VectorXd points, int np) {
-    std::ofstream file(filename);
-
-    // 检查文件是否成功打开
-    if (!file.is_open()) {
-        std::cerr << "Failed to open file." << std::endl;
-        return 0;
-    }
-
-    // 遍历数组并写入每个点到文件
-    for (int i = 0; i < 2 * np; i++) {
-        file << points[i] << std::endl;
-    }
-
-    // 关闭文件流
-    file.close();
-    return 1;
-}
-int write_file(char* filename, vector<double> points, int np) {
-    std::ofstream file(filename);
-
-    // 检查文件是否成功打开
-    if (!file.is_open()) {
-        std::cerr << "Failed to open file." << std::endl;
-        return 0;
-    }
-
-    // 遍历数组并写入每个点到文件
-    for (int i = 0; i < 2 * np; i++) {
-        file << points[i] << std::endl;
-    }
-
-    // 关闭文件流
-    file.close();
-    return 1;
-}
-int write_file(char* filename, int* triangles, int nt) {
-    std::ofstream file(filename);
-
-    // 检查文件是否成功打开
-    if (!file.is_open()) {
-        std::cerr << "Failed to open file." << std::endl;
-        return 0;
-    }
-
-    // 遍历数组并写入每个点到文件
-    for (int i = 0; i < nt; i++) {
-        file << triangles[3 * i] << std::endl;
-        file << triangles[3 * i + 1] << std::endl;
-        file << triangles[3 * i + 2] << std::endl;
-    }
-
-    // 关闭文件流
-    file.close();
-    return 1;
-}
-
 VectorXd calculate_Ax_b(SparseMatrix<double> K, VectorXd b) {
     Eigen::SparseLU<Eigen::SparseMatrix<double>> solver;
     solver.compute(K);
@@ -335,6 +258,7 @@ int remesh(MMG5_pMesh mmgMesh, MMG5_pSol mmgSol, double*& points, int np, int*& 
     edges = Edges;
     return 1;
 }
+
 Eigen::SparseMatrix<CppAD::AD<double>> Build_stiffness_Matrix(int nv, const vector<CppAD::AD<double>>& vertices, int nt, int* triangles) {
     Eigen::SparseMatrix<CppAD::AD<double>> sparse_K(nv * 2, nv * 2);
     Eigen::Matrix<CppAD::AD<double>, 3, 3>D;
@@ -446,17 +370,32 @@ SparseMatrix<double> Build_G(int nv, double* vertices, SparseMatrix<double> N) {
     G = G * N;
     return G;
 }
-SparseMatrix<CppAD::AD<double>> Build_G(int nv, vector<CppAD::AD<double>> vertices, SparseMatrix<CppAD::AD<double>> N) {
+
+SparseMatrix<double> Build_M_G(int nv, double* vertices) {
+    Eigen::SparseMatrix<double> G(3, nv * 2);
+    for (int k = 0; k < nv; k++) {
+        G.insert(0, 2 * k) = 1;
+        G.insert(1, 2 * k + 1) = 1;
+        //G.insert(2, 2 * k) = -(vertices[2 * k + 1] - center[1]);//-r_y
+        //G.insert(2, 2 * k + 1) = vertices[2 * k] - center[0];//r_x
+        G.insert(2, 2 * k) = -(vertices[2 * k + 1]);//-r_y
+        G.insert(2, 2 * k + 1) = vertices[2 * k];//r_x
+    }
+    return G;
+}
+SparseMatrix<CppAD::AD<double>> Build_M_G(int nv, vector<CppAD::AD<double>> vertices) {
     Eigen::SparseMatrix<CppAD::AD<double>> G(3, nv * 2);
     for (int k = 0; k < nv; k++) {
         G.insert(0, 2 * k) = 1;
         G.insert(1, 2 * k + 1) = 1;
+        //G.insert(2, 2 * k) = -(vertices[2 * k + 1] - center[1]);//-r_y
+        //G.insert(2, 2 * k + 1) = vertices[2 * k] - center[0];//r_x
         G.insert(2, 2 * k) = -(vertices[2 * k + 1]);//-r_y
         G.insert(2, 2 * k + 1) = vertices[2 * k];//r_x
     }
-    G = G * N;
     return G;
 }
+
 SparseMatrix<CppAD::AD<double>> Build_N(int nv, int ne, int* Edges, const vector<CppAD::AD<double>>& Points) {
     Eigen::SparseMatrix<CppAD::AD<double>> N(nv * 2, ne);
     //CppAD::AD<double>* Normals = (CppAD::AD<double>*)calloc(nv * 2, sizeof(CppAD::AD<double>));
@@ -538,7 +477,6 @@ SparseMatrix<double> Build_N(int nv, int ne, int* Edges, double* points, double*
     Area = area;
     return N;
 }
-
 SparseMatrix<double> Build_N_for_stress(int nv, int ne, int* Edges, double* points) {
     Eigen::SparseMatrix<double> N(nv * 2, ne);
     double* Normals = (double*)calloc(nv * 2, sizeof(double));
@@ -594,7 +532,6 @@ Eigen::SparseMatrix<double> Calculate_Stresses(int nv, int ne, int* Edges, doubl
         I.insert(i, i) = 1.0;
     }
     p = (I - G.transpose() * (sparse_GGT_inverse)*G) * p;
-
     Eigen::VectorXd u(n + 3);
     Eigen::VectorXd f(n);
     //计算位移displacement
@@ -602,11 +539,8 @@ Eigen::SparseMatrix<double> Calculate_Stresses(int nv, int ne, int* Edges, doubl
     f.conservativeResize(n + 3);
     f[n] = 0.0; f[n + 1] = 0.0; f[n + 2] = 0.0;
     u = solver.solve(f);
-    // 检查解是否成功
     std::cout << "The norm of u is : " << u.norm() << std::endl;
     Eigen::Matrix<double, Eigen::Dynamic, 1> f_solve(2 * nv);
-    //f_solve = K * u;
-    //cout << "F_solve - f :" << (f_solve - f).norm() << endl;
 
     Eigen::SparseMatrix<double> sparse_Stress(nt * 3, 1);
     Eigen::Matrix<double, 3, 1>S_tress_e;
@@ -675,9 +609,9 @@ Eigen::SparseMatrix<double> merge_matrix(Eigen::SparseMatrix<double> K, Eigen::S
     return Merged;
 }
 
+// Calculate the term A.
 VectorXd Calculate_sigma_A(int nv, int ne, int* Edges, double* points, int nt, int* triangles, VectorXd u, double t) {
-    //Eigen::SparseMatrix<double> stress(3, 2 * nv + 3);
-    VectorXd stress(2 * nv + 3);
+    VectorXd stress(2 * nv + 3); stress.setZero();
     VectorXd ue(6);
     VectorXd se(6);
     VectorXd Stress_e(3);
@@ -689,6 +623,7 @@ VectorXd Calculate_sigma_A(int nv, int ne, int* Edges, double* points, int nt, i
     D << 1, mu, 0,
         mu, 1, 0,
         0, 0, (1 - mu) / 2;
+    D *= (E / (1 - mu * mu));
     for (int k = 0; k < nt; k++) {
         double p1_x, p1_y, p2_x, p2_y, p3_y, p3_x;
         int t1, t2, t3;
@@ -720,14 +655,8 @@ VectorXd Calculate_sigma_A(int nv, int ne, int* Edges, double* points, int nt, i
         MatrixXd O(2, 2);
         tI_stress_1 << t * 1.0 - Stress_e[0], -Stress_e[2], -Stress_e[2], t * 1.0 - Stress_e[1];
         tI_stress_2 << t * 1.0 + Stress_e[0], Stress_e[2], Stress_e[2], t * 1.0 + Stress_e[1];
-        //cout << "-----------------------------------------------------" << endl;
-        //cout << "Stress_e : " << Stress_e << endl;
-        //cout << "tI_stress_1 : " << endl << tI_stress_1 << endl;
-        //cout << "tI_stress_2 : " << endl << tI_stress_2 << endl;
         tI_stress_1 = tI_stress_1.inverse();
         tI_stress_2 = tI_stress_2.inverse();
-        //cout << "tI_stress_1 : "<<endl<< tI_stress_1 << endl;
-        //cout << "tI_stress_2 : " << endl << tI_stress_2 << endl;
         O = tI_stress_1 - tI_stress_2;
         D_e[0] = O.coeffRef(0, 0); D_e[1] = O.coeffRef(1, 1); D_e[2] = O.coeffRef(0, 1) + O.coeffRef(1, 0);
         se = D_e.transpose() * sigma;
@@ -741,13 +670,12 @@ VectorXd Calculate_sigma_A(int nv, int ne, int* Edges, double* points, int nt, i
 double Calculate_Stresses_AD(int nv, int ne, int* Edges, double* points, int nt, int* triangles, double t, VectorXd p, VectorXd& grad_s, Eigen::SparseLU<Eigen::SparseMatrix<double>>& solver) {
     int n = 2 * nv;
     auto start_time_AD = std::chrono::high_resolution_clock::now();
-    //Eigen::SparseMatrix<CppAD::AD<double>> N = Build_N_AD(nv, ne, Edges, vertices);
     //1-计算位移 u 
     Eigen::SparseMatrix<double> K = Build_stiffness_Matrix(nv, points, nt, triangles);
     Eigen::SparseMatrix<double> N = Build_N_for_stress(nv, ne, Edges, points);
     Eigen::SparseMatrix<double> G = Build_G(nv, points, N);
-    Eigen::SparseMatrix<double> grad_M(2 * nv + 3, 2 * nv + 3);
-    Eigen::VectorXd grad_O_s(n);
+    Eigen::SparseMatrix<double> grad_M(2 * nv + 3, 2 * nv + 3); grad_M.setZero();
+    Eigen::VectorXd grad_O_s(n); grad_O_s.setZero();
 
     Eigen::MatrixXd GGT = G * G.transpose();
     Eigen::MatrixXd GGT_inverse = GGT.inverse();
@@ -756,23 +684,20 @@ double Calculate_Stresses_AD(int nv, int ne, int* Edges, double* points, int nt,
     for (int i = 0; i < ne; i++) {
         I.insert(i, i) = 1.0;
     }
-    p = (I - G.transpose() * (sparse_GGT_inverse)*G) * p;
+    //p = (I - G.transpose() * (sparse_GGT_inverse)*G) * p;
     VectorXd f = N * p;
     f.conservativeResize(f.size() + 3);
     f[n] = 0.0; f[n + 1] = 0.0; f[n + 2] = 0.0;
-    VectorXd u(2 * nv + 3);
+    VectorXd u(2 * nv + 3); u.setZero();
     //计算位移displacement
     // 使用分解结果解决 Ax = b
     u = solver.solve(f);
     std::cout << "The norm of u is : " << u.norm() << std::endl;
 
-    //-计算位移 u over -1
-
-    //2-计算每个单元的stress
-    //VectorXd stress_e(3);
+    //A bunch of initializations
     VectorXd ue(6);
     Eigen::VectorXd Stress_e;
-    VectorXd grad_f_s(2 * nv + 3);
+    VectorXd grad_f_s(2 * nv + 3); grad_f_s.setZero();
     Eigen::Matrix<double, 3, 3>D;
     Eigen::Matrix<double, 3, 6>B;
     Eigen::Matrix<double, 3, 6>sigma;
@@ -781,6 +706,7 @@ double Calculate_Stresses_AD(int nv, int ne, int* Edges, double* points, int nt,
 
     Eigen::Matrix<CppAD::AD<double>, 3, 3>D_ad;
     Eigen::Matrix<CppAD::AD<double>, 3, 6>B_ad;
+    Eigen::Matrix< CppAD::AD<double>, 3, 3> Area;
     Eigen::Matrix<CppAD::AD<double>, 3, 6>sigma_s;
     Eigen::SparseMatrix<CppAD::AD<double>> N_AD;
     Eigen::SparseMatrix<CppAD::AD<double>> G_AD;
@@ -795,7 +721,7 @@ double Calculate_Stresses_AD(int nv, int ne, int* Edges, double* points, int nt,
     std::vector<CppAD::AD<double>> K_AD_Vector;
     std::vector<CppAD::AD<double>> G_AD_Vector;
     Eigen::Matrix<CppAD::AD<double>, Eigen::Dynamic, 1> pressure(ne);
-    ///这里尚未赋值，需要在最后计算p之后再进行赋值
+
     for (int k = 0; k < p.size(); k++) {
         pressure[k] = p[k];
     }
@@ -807,16 +733,14 @@ double Calculate_Stresses_AD(int nv, int ne, int* Edges, double* points, int nt,
         mu, 1, 0,
         0, 0, (1 - mu) / 2;
     D_ad *= (E / (1 - mu * mu));
-    //calculate M_Np
-    auto start_time_Np = std::chrono::high_resolution_clock::now();
-
+    
+    //Calculate B
     VectorXd O_B = solver.solve(f);
-    cout << "O_B:" << O_B.size() << endl;
-    auto end_time_Np = std::chrono::high_resolution_clock::now();
-    auto duration_Np = std::chrono::duration_cast<std::chrono::seconds>(end_time_Np - start_time_Np).count();
-    std::cout << "||------ The cost of calculating the M-Np : " << duration_Np << " seconds ------||" << endl << endl;
+    //Calculate A
+    VectorXd sigma_A = Calculate_sigma_A(nv, ne, Edges, points, nt, triangles, u, t);
+    VectorXd O_A = solver.solve(sigma_A);
 
-    //calculate Grad_K
+    //Calculate Grad_K
     vector<CppAD::AD<double>> vertices(2 * nv);
     vector<double> vertices_x(2 * nv);
     for (int i = 0; i < 2 * nv; i++) {
@@ -825,13 +749,9 @@ double Calculate_Stresses_AD(int nv, int ne, int* Edges, double* points, int nt,
     }
     cout << "number of triangles: " << nt << endl;
     cout << "The number of vertices: " << n << endl;
-    auto START_TIME2 = std::chrono::high_resolution_clock::now();
     CppAD::Independent(vertices);
     Eigen::SparseMatrix<CppAD::AD<double>> K_AD = Build_stiffness_Matrix(nv, vertices, nt, triangles);
     // 遍历 K 的非零元素
-    auto end_time9 = std::chrono::high_resolution_clock::now();
-    auto duration_Np9 = std::chrono::duration_cast<std::chrono::microseconds>(end_time9 - START_TIME2).count() / 1e6;
-    std::cout << "||------ The cost of building KAD : " << duration_Np9 << " seconds ------||" << endl << endl;
     row_indices.clear(); col_indices.clear(); K_AD_Vector.clear();
     for (int k = 0; k < K_AD.outerSize(); ++k) {
         for (Eigen::SparseMatrix<CppAD::AD<double>>::InnerIterator it(K_AD, k); it; ++it) {
@@ -840,15 +760,13 @@ double Calculate_Stresses_AD(int nv, int ne, int* Edges, double* points, int nt,
             K_AD_Vector.push_back(CppAD::AD<double>(it.value()));// it.value()     // 非零元素的值
         }
     }
-    CppAD::ADFun<double> func(vertices, K_AD_Vector);    // 创建 ADFun 对象
+    CppAD::ADFun<double> func(vertices, K_AD_Vector);  
     jac_K = func.Jacobian(vertices_x);
-    auto end_time11 = std::chrono::high_resolution_clock::now();
-    auto duration_Np11 = std::chrono::duration_cast<std::chrono::microseconds>(end_time11 - end_time9).count() / 1e6;
-    std::cout << "||------ The cost of calculating the grad_K : " << duration_Np11 << " seconds ------||" << endl << endl;
+
     //calculate grad_G
     CppAD::Independent(vertices);
-    N_AD = Build_N(nv, ne, Edges, vertices);
-    G_AD = Build_G(nv, vertices, N_AD);
+    //N_AD = Build_N(nv, ne, Edges, vertices);
+    G_AD = Build_M_G(nv, vertices);
     G_row_indices.clear(); G_col_indices.clear(); G_AD_Vector.clear();
     for (int k = 0; k < G_AD.outerSize(); ++k) {
         for (Eigen::SparseMatrix<CppAD::AD<double>>::InnerIterator it(G_AD, k); it; ++it) {
@@ -858,21 +776,9 @@ double Calculate_Stresses_AD(int nv, int ne, int* Edges, double* points, int nt,
         }
     }
     CppAD::ADFun<double> G_func(vertices, G_AD_Vector);    // 创建 ADFun 对象
-    jac_G = func.Jacobian(vertices_x);
-    auto end_time12 = std::chrono::high_resolution_clock::now();
-    auto duration_Np12 = std::chrono::duration_cast<std::chrono::microseconds>(end_time12 - end_time11).count() / 1e6;
-    std::cout << "||------ The cost of calculating the grad_G : " << duration_Np12 << " seconds ------||" << endl << endl;
+    jac_G = G_func.Jacobian(vertices_x);
 
-
-    VectorXd sigma_A = Calculate_sigma_A(nv, ne, Edges, points, nt, triangles, u, t);
-    VectorXd O_A = solver.solve(sigma_A);
-    for (int i = 0; i < ne; i++) {
-        cout << O_A[i] << endl;
-    }
-    cout << "O_A:[0]: " << O_A[0] << "  " << O_A[5] << endl;
-
-    //calculate grad_sigma(s)
-    Matrix< CppAD::AD<double>, 3, 3> Area;
+    // Calculate the second part in the formula derivation, that is, C_k * B;
     for (int k = 0; k < nt; k++) {
         double p1_x, p1_y, p2_x, p2_y, p3_y, p3_x;
         int t1, t2, t3;
@@ -909,14 +815,13 @@ double Calculate_Stresses_AD(int nv, int ne, int* Edges, double* points, int nt,
         B /= (2.0 * A);
         sigma = D * B;
         Sigma_AD_Vector.clear();
+        // Calculate the gradient of sigma with respect to shape.
         for (int sigma_i = 0; sigma_i < 3; sigma_i++)
             for (int sigma_j = 0; sigma_j < 6; sigma_j++)
                 Sigma_AD_Vector.push_back(sigma_s.coeffRef(sigma_i, sigma_j));
         CppAD::ADFun<double> sigma_fun(s, Sigma_AD_Vector);
         jac_Sigma_s = sigma_fun.Jacobian(s_x);
-
         int index[] = { 2 * t1,2 * t1 + 1,2 * t2,2 * t2 + 1,2 * t3,2 * t3 + 1 };
-
         ue << u[t1 * 2], u[t1 * 2 + 1], u[t2 * 2], u[t2 * 2 + 1], u[t3 * 2], u[t3 * 2 + 1];
         Stress_e = sigma * ue;
         MatrixXd tI_stress_1(2, 2), tI_stress_2(2, 2);
@@ -950,12 +855,14 @@ double Calculate_Stresses_AD(int nv, int ne, int* Edges, double* points, int nt,
         s_k_x[0] = points[s_i];
         CppAD::Independent(s_k);
         vertices[s_i] = s_k[0];
+        // Calculate the gradient of N with respect to shape.
         N_AD = Build_N(nv, ne, Edges, vertices);
         Eigen::Matrix<CppAD::AD<double>, Eigen::Dynamic, 1> F_vector_Matrix = N_AD * pressure;
         std::vector<CppAD::AD<double>> F_vector;
         for (int k_i = 0; k_i < F_vector_Matrix.outerSize(); ++k_i)
             for (int num = 0; num < F_vector_Matrix.innerSize(); num++)
                 F_vector.push_back(F_vector_Matrix(num, k_i));
+        //cout << "F_vector size: " << F_vector.size() << endl;
         CppAD::ADFun<double> N_s(s_k, F_vector);
         vector<double> jac_N(2 * nv);
         jac_N = N_s.Jacobian(s_k_x);
@@ -972,30 +879,25 @@ double Calculate_Stresses_AD(int nv, int ne, int* Edges, double* points, int nt,
         non_zero = G_AD_Vector.size();
         for (int it = 0; it < non_zero; it++)
             if (jac_G[it * n + s_i] != 0) {
+                if (G_row_indices[it] < 2) {
+                    cout << "index : " << G_row_indices[it] << " , " << G_col_indices[it] << endl;
+                }
                 grad_M.insert(G_row_indices[it] + n, G_col_indices[it]) = jac_G[it * n + s_i];
                 grad_M.insert(G_col_indices[it], G_row_indices[it] + n) = jac_G[it * n + s_i];
             }
         grad_M.makeCompressed();
         double part2 = O_A.transpose() * grad_f_s;
         double part3 = O_A.transpose() * grad_M * O_B;
+
         grad_O_s[s_i] += O_mu * (part2 - part3);
         vertices[s_i] = CppAD::AD<double>(points[s_i]);
+
     }
 
     grad_s = grad_O_s;
     auto end_time_stress = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::seconds>(end_time_stress - start_time_AD).count();
     std::cout << "|| The cost of d_stress/d_s : " << duration << " seconds" << endl << endl << endl;
-
-    std::ostringstream stream;
-    // 设置宽度为3，左侧填充0
-    stream << std::setw(3) << std::setfill('0') << count_time;
-    std::string grad_save_str = "Results/Grad_AD__" + stream.str() + ".txt";
-    char* grad_save = const_cast<char*>(grad_save_str.c_str());
-    if (!write_file(grad_save, grad_s, nv)) {
-        cout << "Save FAILED!" << endl;
-        return -1;
-    }
     return 1.0;
 }
 
@@ -1020,24 +922,15 @@ CppAD::AD<double> Calculate_O(const CppAD::AD<double> t, Eigen::SparseMatrix<dou
         det1 = (I - sigma).determinant();
         det2 = (I + sigma).determinant();
         if (det1 < 1e-3 || det2 < 1e-3)
-        {
-            cout << t << endl;
-            cout << stress.coeff(3 * i, 0) << "  " << stress.coeff(3 * i + 1, 0) << "  " << stress.coeff(3 * i + 2, 0) << endl;
-            cout << "Invalid Guess s,t" << endl;
             return -1e6;
-        }
         Eigen::Matrix<double, 2, 2> Sigma, tI;
         Sigma << stress.coeff(3 * i, 0), stress.coeff(3 * i + 2, 0),
             stress.coeff(3 * i + 2, 0), stress.coeff(3 * i + 1, 0);
         tI << Value(t) * 1.0, 0.0, 0.0, Value(t) * 1.0;
         Eigen::MatrixXd mat1 = tI - Sigma;
         Eigen::MatrixXd mat2 = tI + Sigma;
-        if (!isPositiveSemiDefinite(mat1) || !isPositiveSemiDefinite(mat2)) {
-            cout << t << endl;
-            cout << stress.coeff(3 * i, 0) << "  " << stress.coeff(3 * i + 1, 0) << "  " << stress.coeff(3 * i + 2, 0) << endl;
-            cout << "NOT Positive SemiDefinite." << endl;
+        if (!isPositiveSemiDefinite(mat1) || !isPositiveSemiDefinite(mat2)) 
             return -1e6;
-        }
         O += -O_mu * (CppAD::log(det1) + CppAD::log(det2));
     }
     O += t;
@@ -1067,7 +960,8 @@ double calculate_max_eigenvalue(SparseMatrix<double> K) {
 }
 
 int main() {
-    string model_name = "test_236_1";
+    //test();
+    string model_name = "test_00_out";
     std::string path = "IO/";
     std::string filename_str = "IO/" + model_name + ".mesh";
     char* filename = const_cast<char*>(filename_str.c_str());
@@ -1085,6 +979,7 @@ int main() {
     MMG5_pMesh mmgMesh = ReadFromMesh(mmgSol, filename, points, triangles, Edges, center);
     MMG2D_Get_meshSize(mmgMesh, &np, &nt, NULL, &nbe);
     std::cout << "Number of Boundary:" << nbe << endl;
+    int iter = 0;
     //Optimize
     for (int iter_time = 0; iter_time < 50; iter_time++) {
         int n = 2 * np;
@@ -1092,21 +987,24 @@ int main() {
         auto start_time = std::chrono::high_resolution_clock::now();
         Eigen::SparseMatrix<double> N;
         Eigen::SparseMatrix<double> G;
+        Eigen::SparseMatrix<double> M_G;
         Eigen::SparseMatrix<double> K;
-        //转变为double的SparseMatrix
+        //calculate K/N/G/M_G
         K = Build_stiffness_Matrix(np, points, nt, triangles);
         N = Build_N(np, nbe, Edges, points, Area);
         G = Build_G(np, points, N);        //计算G
-        Eigen::SparseMatrix<double> M = merge_matrix(K, G);
+        M_G = Build_M_G(np, points);        //计算G
+        Eigen::SparseMatrix<double> M = merge_matrix(K, M_G);
         Eigen::SparseLU<Eigen::SparseMatrix<double>> solver_LU;
         solver_LU.compute(M);
         if (solver_LU.info() != Eigen::Success) {
             std::cerr << "Decomposition failed!" << std::endl;
             throw std::runtime_error("The inverse of K cannot be computed !");
         }
-        //计算K的最大特征值.
+        // Calculate the largest eigenvalue of K.
         double MaxEigenvalue = calculate_max_eigenvalue(K) * 10000.0;
 
+        // GEP: Construct generalized eigen solver object, requesting the Smallest three generalized eigenvalues
         Eigen::SparseMatrix<double> I(nbe, nbe);
         for (int i = 0; i < nbe; i++) {
             I.insert(i, i) = 1.0;
@@ -1125,17 +1023,18 @@ int main() {
             A.insert(2 * i, 2 * i) = Area[i];
             A.insert(2 * i + 1, 2 * i + 1) = Area[i];
         }
+        Eigen::SparseMatrix<double> P = I - G.transpose() * (sparse_GGT_inverse)*G;
         Eigen::SparseMatrix<double> matrix_B = N.transpose() * A * N;
         SparseSymMatProd<double> opA(GEP_matrix_sparse);
         SparseCholesky<double>  Bop(matrix_B);
         SymGEigsSolver<SparseSymMatProd<double>, SparseCholesky<double>, GEigsMode::Cholesky>
             geigs(opA, Bop, 3, 12);
 
-        // Initialize and compute   GEP
+        // GEP: Initialize and compute
         geigs.init();
         int nconv = geigs.compute(SortRule::SmallestAlge);
 
-        // Retrieve results
+        // GEP: Retrieve results
         Eigen::VectorXd evalues;
         Eigen::MatrixXd evecs_GEP;
 
@@ -1147,35 +1046,53 @@ int main() {
 
         VectorXd p = evecs_GEP.col(2);
         VectorXd p_stress = evecs_GEP.col(2);
+       
+        VectorXd u, f;
+        f = N * p;
+        std::cout << "模长(f)：" << f.norm() << endl;
+        f.conservativeResize(n + 3);
+        f[n] = 0.0; f[n + 1] = 0.0; f[n + 2] = 0.0;
+        u = solver_LU.solve(f);
 
-        //optimization
+        //Optimization
         bool loop = true, loop_t = true, loop_s = true;
         double* x = (double*)calloc(np * 2, sizeof(double));
-        vector<CppAD::AD<double>> t(1);
-        vector<double> t_x(1);
-
+        // Assign a value to x, x temporarily stores the unchanged shape.
         for (size_t i = 0; i < np * 2; ++i) {
             x[i] = points[i]; // 
         }
-        t[0] = 1e4; t_x[0] = 1e4;
-        double threshold = 1e-5, gamma = 0.5;
+        double threshold_t = 1e-3, gamma = 0.5;
+        double threshold_s = 0.1;
 
-        //Initial test: feasible initial guess s,t
+        // Verify that the initial values of s and t are valid.
+        vector<CppAD::AD<double>> t(1);
+        vector<double> t_x(1);
+        t[0] = 1e4; t_x[0] = 1e4;
         CppAD::Independent(t);
         Eigen::SparseMatrix<double> sparse_Stress = Calculate_Stresses(np, nbe, Edges, points, nt, triangles, p_stress, solver_LU);
         CppAD::AD<double> O = Calculate_O(t[0], sparse_Stress, nt);
         if (O < -1e5) {
-            std::cout << "Invalid Initial!!" << endl;
             loop = false;
-            throw std::runtime_error("The initial s,t are invalid!");
+            throw std::runtime_error("Invalid Initial!!");
         }
-        int iter = 0;
+
         CppAD::AD<double> last_O = O, last_O_t = O, last_O_s = O;
         std::vector<double> jac_O_t;
         double alpha = 0.001;
+        //   Optimize  //
         while (loop) {
+            // Every time the shape is updated, it is necessary to recalculate K, N, M_G, and solver_LU once.
+            K = Build_stiffness_Matrix(np, points, nt, triangles);
+            M_G = Build_M_G(np, points);        //计算G
+            M = merge_matrix(K, M_G);
+            solver_LU.compute(M);
+            if (solver_LU.info() != Eigen::Success) {
+                std::cerr << "Decomposition failed!" << std::endl;
+                throw std::runtime_error("The inverse of K cannot be computed !");
+            }
             iter++;
-            //optimize t 
+            std::cout << endl << "----------------The iteration on loop:" << iter << "---------------" << endl;
+            //Optimize t 
             loop_t = true;
             sparse_Stress = Calculate_Stresses(np, nbe, Edges, points, nt, triangles, p_stress, solver_LU);
             cout << "--------------------Optimize t: ---------------------------------------------------------------------------------" << endl;
@@ -1187,15 +1104,18 @@ int main() {
                 O_var[0] = O;
                 last_O_t = O;
                 CppAD::ADFun<double> func(t, O_var);    // 创建 ADFun 对象
-                jac_O_t = func.Jacobian(t_x);
+                jac_O_t = func.Jacobian(t_x); // Calculate the first derivative of O with respect to t
                 std::vector<double> w(1);
                 w[0] = 1.0;  // 权重
-                std::vector<double> hess_O_t = func.Hessian(t_x, w);
+                std::vector<double> hess_O_t = func.Hessian(t_x, w); // Calculate the second derivative of O with respect to t
+                // Find the derivative with the largest absolute value.
                 double maxVal = 0.0;
                 for (double val : jac_O_t) {
                     maxVal = std::max(maxVal, std::abs(val));
                 }
-                if (maxVal < threshold) { loop_t = false; break; }
+                if (maxVal < threshold_t) { // If the maximum derivative value has reached the threshold, the optimization ends.
+                    cout << "The max gradient on t : " << maxVal << endl; loop_t = false; break;
+                }
                 while (true) {
                     CppAD::AD<double> temp = t[0];
                     t[0] = t[0] - alpha_t * (jac_O_t[0] / hess_O_t[0]);
@@ -1214,76 +1134,36 @@ int main() {
                 cout << "O:" << O << " The max of O_t : " << maxVal << "  t : " << t_x[0] << " dt:" << (jac_O_t[0] / hess_O_t[0]) << " |Alpha:" << alpha_t << endl;
             }
 
-            //optimize s
+            //Optimize s
             cout << "-------------------Optimize s: ----------Optimize s: ----------------- Optimize s --------------------------------------------------" << endl;
-            cout << "The value of O after optomization on t : " << last_O_t << endl;
+            cout << "The value of O after optimization on t : " << last_O_t << endl;
             VectorXd grad_s;
+            // Calculate the gradient of O with respect to s.
             Calculate_Stresses_AD(np, nbe, Edges, points, nt, triangles, t_x[0], p_stress, grad_s, solver_LU);
             sparse_Stress = Calculate_Stresses(np, nbe, Edges, points, nt, triangles, p_stress, solver_LU);
             O = Calculate_O(t[0], sparse_Stress, nt);
             last_O_s = O;
-            VectorXd direction(n);
-            std::random_device rd;
-            std::mt19937 gen(rd());
-            std::uniform_real_distribution<double> dis(-1.0f, 1.0f);
-            for (int i = 0; i < np; i++) {
-                double directionX = dis(gen);
-                double directionY = dis(gen);
-                // 计算向量长度
-                double length = std::sqrt(directionX * directionX + directionY * directionY);
-                // 规范化向量
-                directionX /= length;
-                directionY /= length;
-                direction[2 * i] = directionX;
-                direction[2 * i + 1] = directionY;
-            }
-            double eps = 1e-6;
-            double O_last = Value(O);
-            //做有限差分的验证
-            for (int k = 0; k < 10; k++) {
-                eps /= 2.0;
-                for (int i = 0; i < n; i++) {
-                    points[i] = (x[i] + eps * direction[i]);
-                }
-                //After updating points,we need to update K,N,G->M,so we need to rebuild a solver for new M.
-                K = Build_stiffness_Matrix(np, points, nt, triangles);
-                N = Build_N(np, nbe, Edges, points, Area);
-                G = Build_G(np, points, N);        //计算G
-                M = merge_matrix(K, G);
-                Eigen::SparseLU<Eigen::SparseMatrix<double>> solver_LU_new;
-                solver_LU_new.compute(M);
-                sparse_Stress = Calculate_Stresses(np, nbe, Edges, points, nt, triangles, p_stress, solver_LU_new);
-                O = Calculate_O(t[0], sparse_Stress, nt);
-                double O_new = Value(O);
-                double dO = O_new - O_last;
-                double dOdt = dO / eps;
-                double grad_dot = grad_s.dot(direction);
-                cout << "----------------------------------------- EPS: " << eps << "---------------------------------------" << endl;
-                cout << "O_new : " << O_new << "   O : " << O_last << endl;
-                cout << "dO : " << dO << endl;
-                cout << "dOdt : " << dOdt << endl;
-                cout << "Grad_dot : " << grad_dot << endl;
-                cout << "--------------------------------------------------------------------------------" << endl;
-            }
 
             double maxVal = 0.0;
+            // Find the derivative with the largest absolute value.
             for (double val : grad_s) {
                 maxVal = std::max(maxVal, std::abs(val));
             }
-            if (maxVal < threshold) { loop = false; break; }
-            if (maxVal * alpha > 0.05) {
+            if (maxVal < threshold_s) { loop = false; break; }
+
+            // Calculate the maximum displacement of the shape. 
+            // If the displacement is greater than the edge length of the model's cell, then reduce the step size.
+            while (maxVal * alpha > 0.05) {
                 alpha *= gamma;
-                continue;
             }
             while (true) {
                 for (int i = 0; i < n; i++) {
                     points[i] = x[i] - alpha * grad_s[i];
                 }
-                //After updating points,we need to update K,N,G->M,so we need to rebuild a solver for new M.
+                //After updating points,we need to update K,N,G->M,so we also need to rebuild a solver for new M.
                 K = Build_stiffness_Matrix(np, points, nt, triangles);
-                N = Build_N(np, nbe, Edges, points, Area);
-                G = Build_G(np, points, N);        //计算G
-                M = merge_matrix(K, G);
+                M_G = Build_M_G(np, points);        //计算G
+                M = merge_matrix(K, M_G);
                 Eigen::SparseLU<Eigen::SparseMatrix<double>> solver_LU_new;
                 solver_LU_new.compute(M);
                 sparse_Stress = Calculate_Stresses(np, nbe, Edges, points, nt, triangles, p_stress, solver_LU_new);
@@ -1304,7 +1184,7 @@ int main() {
                     alpha *= gamma;
                 }
             }
-
+            loop_t = true;
             cout << "The iteration : " << iter << " |O: " << last_O_s << " |max of O_s: " << maxVal << " | alpha :" << alpha << endl;
         }
 

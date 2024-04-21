@@ -107,7 +107,7 @@
 //}
 
 
-double Energy_shell(Eigen::MatrixXd V, Eigen::MatrixXi F, Eigen::VectorXd& grad) {
+double Energy_shell(Eigen::MatrixXd V, Eigen::MatrixXi F, Eigen::MatrixXd V_init, Eigen::VectorXd& grad) {
 
     //Eigen::MatrixXd V;
     //Eigen::MatrixXi F;
@@ -117,11 +117,11 @@ double Energy_shell(Eigen::MatrixXd V, Eigen::MatrixXi F, Eigen::VectorXd& grad)
     LibShell::MeshConnectivity mesh(F);
     Eigen::VectorXd edgeDOFs;
     LibShell::MidedgeAverageFormulation::initializeExtraDOFs(edgeDOFs, mesh, V);
-    LibShell::MaterialModel<LibShell::MidedgeAverageFormulation>* mat = new LibShell::StVKMaterial<LibShell::MidedgeAverageFormulation>();;
-    mat = new LibShell::StVKMaterial<LibShell::MidedgeAverageFormulation>();
-
+    //LibShell::MaterialModel<LibShell::MidedgeAverageFormulation>* mat = new LibShell::StVKMaterial<LibShell::MidedgeAverageFormulation>();;
+    //mat = new LibShell::StVKMaterial<LibShell::MidedgeAverageFormulation>();
+    LibShell::MaterialModel<LibShell::MidedgeAverageFormulation>* mat = new LibShell::NeoHookeanMaterial<LibShell::MidedgeAverageFormulation>();;
+    mat = new LibShell::NeoHookeanMaterial<LibShell::MidedgeAverageFormulation>();
     double thickness = 0.1;
-    double dt = 0.001;
     double possion_ratio = 0.5;
     double lameAlpha, lameBeta;
     double young = 1.0; // doesn't matter for static solves
@@ -133,7 +133,7 @@ double Energy_shell(Eigen::MatrixXd V, Eigen::MatrixXi F, Eigen::VectorXd& grad)
     //std::cout << "mesh.nFaces() : " << mesh.nFaces() << std::endl;
     restState.thicknesses.resize(mesh.nFaces(), thickness);
      //initialize first fundamental forms to those of input mesh
-    LibShell::ElasticShell<LibShell::MidedgeAverageFormulation>::firstFundamentalForms(mesh, V, restState.abars);
+    LibShell::ElasticShell<LibShell::MidedgeAverageFormulation>::firstFundamentalForms(mesh, V_init, restState.abars);
     restState.bbars.resize(mesh.nFaces());
     for (int i = 0; i < mesh.nFaces(); i++)
         restState.bbars[i].setZero();
@@ -154,6 +154,8 @@ double Energy_shell(Eigen::MatrixXd V, Eigen::MatrixXi F, Eigen::VectorXd& grad)
     //derivative.resize(3 * nVerts);
     derivative.setZero();
     energy = LibShell::ElasticShell<LibShell::MidedgeAverageFormulation>::elasticEnergy(mesh, V, edgeDOFs, *mat, restState, &derivative, NULL);
+    //energy = LibShell::ElasticShell<LibShell::MidedgeAverageFormulation>::elasticEnergy(mesh, V, edgeDOFs, *mat, restState, 
+    //    LibShell::ElasticShell<LibShell::MidedgeAverageFormulation>::EnergyTerm::ET_BENDING, &derivative, NULL);
 
     grad = derivative;
     return energy;

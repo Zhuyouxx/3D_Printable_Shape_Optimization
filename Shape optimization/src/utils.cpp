@@ -36,6 +36,30 @@ void extract_surface(Eigen::MatrixXd points, Eigen::MatrixXi triangles, unordere
 
 }
 
+double avg_edge_length(Eigen::MatrixXd V, Eigen::MatrixXi F) {
+
+    double minEdgeLength = FLT_MAX; // Initialize with the maximum float value
+
+    for (int i = 0; i < F.rows(); ++i) {
+        // Get the length of each edge in the face
+        for (int j = 0; j < F.cols(); ++j) {
+            // Vertices of the edge
+            int v0 = F(i, j);
+            int v1 = F(i, (j + 1) % 3);
+
+            // Compute the length of the edge
+            double edgeLength = (V.row(v0) - V.row(v1)).norm();
+            // Update the minimum edge length
+            if (edgeLength < minEdgeLength) {
+                minEdgeLength = edgeLength;
+            }
+        }
+    }
+
+    std::cout << "Shortest Edge Length: " << minEdgeLength << std::endl;
+    return minEdgeLength;
+}
+
 void Calculate_Area(Eigen::MatrixXd V,Eigen::MatrixXi F,Eigen::VectorXd &Area) {
     int nV = V.rows();
     int nF = F.rows();

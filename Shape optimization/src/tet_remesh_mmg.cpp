@@ -51,6 +51,8 @@ int tet_remesh_mmg(string filename, string outputname, double edge_length) {
     if (MMG3D_loadMesh(mmgMesh, filein) != 1)  exit(EXIT_FAILURE);
     if (MMG3D_Set_iparameter(mmgMesh, mmgSol, MMG3D_IPARAM_debug, 1) != 1)
         exit(EXIT_FAILURE);
+    if (MMG3D_Set_iparameter(mmgMesh, mmgSol, MMG3D_IPARAM_nosurf, 1) != 1)
+        exit(EXIT_FAILURE);
     if (MMG3D_Set_iparameter(mmgMesh, mmgSol, MMG3D_IPARAM_verbose, 4) != 1)
         exit(EXIT_FAILURE);
     if (MMG3D_Set_dparameter(mmgMesh, mmgSol, MMG3D_DPARAM_hmax, edge_length) != 1)
@@ -60,23 +62,11 @@ int tet_remesh_mmg(string filename, string outputname, double edge_length) {
         exit(EXIT_FAILURE);
     //if (MMG3D_Set_dparameter(mmgMesh, NULL, MMG3D_DPARAM_hsiz, edge_length) != 1)
     //    exit(EXIT_FAILURE);
-    //if (MMG3D_Set_dparameter(mmgMesh, mmgSol, MMG3D_DPARAM_hgrad, 1.25) != 1)
+    //if (MMG3D_Set_dparameter(mmgMesh, mmgSol, MMG3D_DPARAM_hgrad, 1.2) != 1)
     //    exit(EXIT_FAILURE);
-
     /* Global hausdorff value (default value = 0.01) applied on the whole boundary */
-    //if (MMG3D_Set_dparameter(mmgMesh, mmgSol, MMG3D_DPARAM_hausd, 2.5 * 1e-3) != 1)
-        //exit(EXIT_FAILURE);
-    //if (MMG3D_Set_iparameter(mmgMesh, mmgSol, MMG3D_IPARAM_angle, 1) != 1)
+    //if (MMG3D_Set_dparameter(mmgMesh, mmgSol, MMG3D_DPARAM_hausd, 0.008) != 1)
     //    exit(EXIT_FAILURE);
-    //if (MMG3D_Set_dparameter(mmgMesh, mmgSol, MMG3D_DPARAM_angleDetection, 60) != 1)
-    //    exit(EXIT_FAILURE);
-
-    /* Global hausdorff value (default value = 0.01) applied on the whole boundary */
-    if (MMG3D_Set_dparameter(mmgMesh, mmgSol, MMG3D_DPARAM_hausd, 0.008) != 1)
-        exit(EXIT_FAILURE);
-
-    ///* Gradation control*/
-
     /** remesh function */
     int ier;
     ier = MMG3D_mmg3dlib(mmgMesh, mmgSol);
@@ -192,6 +182,8 @@ int tet_remesh_mmg_Update_Points(MMG5_pMesh mmgMesh, MMG5_pSol mmgSol, double ed
         exit(EXIT_FAILURE);
     if (MMG3D_Set_dparameter(mmgMesh, mmgSol, MMG3D_DPARAM_hausd, 0.008) != 1)
         exit(EXIT_FAILURE);
+    //if (MMG3D_Set_dparameter(mmgMesh, mmgSol, MMG3D_DPARAM_hausd, 0.008) != 1)
+    //    exit(EXIT_FAILURE);
     /** remesh function */
     int ier;
     ier = MMG3D_mmg3dlib(mmgMesh, mmgSol);
@@ -371,4 +363,43 @@ int get_info_from_mesh(MMG5_pMesh& mmgMesh, MMG5_pSol& mmgSol, Eigen::MatrixXd& 
         triangles(k, 2) = Triangle[2] - 1;
     }
     return 1;
+}
+
+
+double get_worst_quality(MMG5_pMesh mmgMesh, MMG5_pSol mmgSol) {
+    int ntet;
+    if (MMG3D_Get_meshSize(mmgMesh, NULL, &ntet, NULL, NULL, NULL, NULL) != 1)  exit(EXIT_FAILURE);
+    double worst_quality = 1.0;
+    int id = -1;
+    for (int i = 0; i < ntet; i++) {
+        double quality = MMG3D_Get_tetrahedronQuality(mmgMesh, mmgSol, i + 1);
+        if (quality < worst_quality) {
+            worst_quality = quality;
+            id = i + 1;
+        }
+    }
+    double worst = worst_quality;
+
+    return worst;
+}
+
+double get_worst_quality(MMG5_pMesh mmgMesh, MMG5_pSol mmgSol, Eigen::MatrixXd points, Eigen::MatrixXi triangles, Eigen::MatrixXi tetrahedras) {
+    int ntet;
+    if (MMG3D_Get_meshSize(mmgMesh, NULL, &ntet, NULL, NULL, NULL, NULL) != 1)  exit(EXIT_FAILURE);
+    double worst_quality = 1.0;
+    int id = -1;
+    for (int i = 0; i < ntet; i++) {
+        double quality = MMG3D_Get_tetrahedronQuality(mmgMesh, mmgSol, i + 1);
+        if (quality < worst_quality) {
+            worst_quality = quality;
+            id = i;
+        }
+    }
+    for (int t = 0; t < 4; t++) {
+        int i = tetrahedras(id, t);
+        cout << points(i, 0) << " " << points(i, 1) << " " << points(i, 2) << " 0 " << std::endl;
+    }
+    double worst = worst_quality;
+
+    return worst;
 }

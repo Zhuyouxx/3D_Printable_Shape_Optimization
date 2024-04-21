@@ -16,22 +16,24 @@ double edge_length = 0.05;
 
 Eigen::SparseMatrix<double> merge_matrix(Eigen::SparseMatrix<double> K, Eigen::SparseMatrix<double> G) {
     // 行合并
+    int k_rows = K.rows();
     Eigen::SparseMatrix<double> Merged(K.rows() + G.rows(), K.rows() + G.rows());
+    std::vector<Eigen::Triplet<double>> tripletList;
+    tripletList.reserve((K.nonZeros() + G.nonZeros()) * 2);
+    // 添加K矩阵的非零元素
     for (int k = 0; k < K.outerSize(); ++k) {
         for (Eigen::SparseMatrix<double>::InnerIterator it(K, k); it; ++it) {
-            Merged.insert(it.row(), it.col()) = it.value();
+            tripletList.emplace_back(it.row(), it.col(), it.value());
         }
     }
+    // 添加G矩阵的非零元素
     for (int k = 0; k < G.outerSize(); ++k) {
         for (Eigen::SparseMatrix<double>::InnerIterator it(G, k); it; ++it) {
-            Merged.insert(K.rows() + it.row(), it.col()) = it.value();
+            tripletList.emplace_back(k_rows + it.row(), it.col(), it.value());
+            tripletList.emplace_back(it.col(), k_rows + it.row(), it.value());
         }
     }
-    for (int k = 0; k < G.outerSize(); ++k) {
-        for (Eigen::SparseMatrix<double>::InnerIterator it(G, k); it; ++it) {
-            Merged.insert(it.col(), K.rows() + it.row()) = it.value();
-        }
-    }
+    Merged.setFromTriplets(tripletList.begin(), tripletList.end());
     Merged.makeCompressed();
     return Merged;
 }
@@ -60,6 +62,9 @@ double algebraicCofactor(Eigen::Matrix< double, 4, 4>& matrix, int i, int j) {
 
 Eigen::SparseMatrix<double> Build_stiffness_Matrix(int nv, Eigen::MatrixXd vertices, int n_tet, Eigen::MatrixXi tetrahedras) {
     Eigen::SparseMatrix<double> sparse_K(nv * 3, nv * 3);
+    vector<map<int, double>> sparse_k_map(3 * nv);
+    VectorXd sparse_pri(3 * nv); sparse_pri.setZero();
+    //sparse_K.reserve(nv * 3 +6* n_tet);
     Eigen::Matrix<double, 6, 6>D;
     Eigen::Matrix<double, 6, 12>B; B.setZero();
     Eigen::Matrix<double, 12, 12>Ke;
@@ -98,11 +103,34 @@ Eigen::SparseMatrix<double> Build_stiffness_Matrix(int nv, Eigen::MatrixXd verti
                         3 * t2, 3 * t2 + 1, 3 * t2 + 2,
                         3 * t3, 3 * t3 + 1, 3 * t3 + 2,
                         3 * t4, 3 * t4 + 1, 3 * t4 + 2 };
-        for (int i = 0; i < 12; i++)
-            for (int j = 0; j < 12; j++) {
-                sparse_K.coeffRef(index[i], index[j]) += Ke(i, j);
+        for (int j = 0; j < 12; j++)
+            for (int i = j; i < 12; i++) {
+                if (index[i] == index[j])
+                    sparse_pri[index[i]] += Ke(i, i);
+                else if (index[i] > index[j])
+                    sparse_k_map[index[i]][index[j]] += Ke(i, j);
+                else
+                    sparse_k_map[index[j]][index[i]] += Ke(j, i);
             }
     }
+    int totalElements = 0;
+    for (const auto& map : sparse_k_map) {  // 遍历vector中的每个map
+        totalElements += map.size();     // 累加每个map的大小
+    }
+    std::vector<Eigen::Triplet<double>> tripletList;
+    tripletList.reserve(totalElements * 2 + 3 * nv);
+    for (int i = 0; i < 3 * nv; i++)
+        tripletList.emplace_back(i, i, sparse_pri[i]);
+    // 添加K矩阵的非零元素
+    for (int k = 0; k < sparse_k_map.size(); ++k) {
+        for (const auto& elem : sparse_k_map[k]) {
+            int colIndex = elem.first;       // 列索引
+            double value = elem.second;      // 值
+            tripletList.emplace_back(k, colIndex, value);
+            tripletList.emplace_back(colIndex, k, value);
+        }
+    }
+    sparse_K.setFromTriplets(tripletList.begin(), tripletList.end());
     sparse_K.makeCompressed();
     return sparse_K;
 }
@@ -112,7 +140,7 @@ SparseMatrix<double> Build_N(int nv, Eigen::MatrixXd V, Eigen::MatrixXi F, Vecto
     int n_tri = F.rows();
     Eigen::SparseMatrix<double> N(nv * 3, n_sp);
     Eigen::MatrixXd Normal;
-    Normal.resize(n_sp, 3);
+    Normal.resize(n_sp, 3); Normal.setZero();
     for (int k = 0; k < n_tri; k++) {
         int pi_id = F(k, 0);
         int pj_id = F(k, 1);
@@ -131,6 +159,7 @@ SparseMatrix<double> Build_N(int nv, Eigen::MatrixXd V, Eigen::MatrixXi F, Vecto
     for (int k = 0; k < n_sp; k++) {
         int id = index_sp[k];
         Vector3d Normal_Of_P = Normal.row(k);
+        //std::cout << Normal_Of_P << std::endl;
         Normal_Of_P.normalize();
         Normal.row(k) = Normal_Of_P;
         N.insert(3 * id, k) = -Normal_Of_P[0];
@@ -152,31 +181,42 @@ SparseMatrix<double> Build_N(int nv, Eigen::MatrixXd V, Eigen::MatrixXi F, Vecto
 
 SparseMatrix<double> Build_G(int nv, Eigen::MatrixXd vertices, SparseMatrix<double> N, int n_sp) {
     Eigen::SparseMatrix<double> G(6, nv * 3);
-    Eigen::SparseMatrix<double> G_N(6, n_sp);
+    std::vector<Eigen::Triplet<double>> tripletList;
+    tripletList.reserve(nv * 3);
+    // 添加K矩阵的非零元素
     for (int k = 0; k < nv; k++) {
-        G.insert(0, 3 * k) = 1;
-        G.insert(1, 3 * k + 1) = 1;
-        G.insert(2, 3 * k + 2) = 1;
+        tripletList.emplace_back(0, 3 * k, 1.0);
+        tripletList.emplace_back(1, 3 * k + 1, 1.0);
+        tripletList.emplace_back(2, 3 * k + 2, 1.0);
 
-        G.insert(3, 3 * k + 1) = -(vertices(k, 2)); G.insert(3, 3 * k + 2) = (vertices(k, 1));
-        G.insert(4, 3 * k) = (vertices(k, 2)); G.insert(4, 3 * k + 2) = -(vertices(k, 0));
-        G.insert(5, 3 * k) = -(vertices(k, 1)); G.insert(5, 3 * k + 1) = (vertices(k, 0));
+        tripletList.emplace_back(3, 3 * k + 1, -(vertices(k, 2))); tripletList.emplace_back(3, 3 * k + 2, (vertices(k, 1)));
+        tripletList.emplace_back(4, 3 * k, vertices(k, 2)); tripletList.emplace_back(4, 3 * k + 2, -(vertices(k, 0)));
+        tripletList.emplace_back(5, 3 * k, -(vertices(k, 1))); tripletList.emplace_back(5, 3 * k + 1, (vertices(k, 0)));
     }
+    G.setFromTriplets(tripletList.begin(), tripletList.end());
+    G.makeCompressed();
+    Eigen::SparseMatrix<double> G_N(6, n_sp);
     G_N = G * N;
     return G_N;
 }
 
 SparseMatrix<double> Build_M_G(int nv, Eigen::MatrixXd vertices) {
     Eigen::SparseMatrix<double> G(6, nv * 3);
+    G.reserve(nv * 9);
+    std::vector<Eigen::Triplet<double>> tripletList;
+    tripletList.reserve(nv * 3);
+    // 添加K矩阵的非零元素
     for (int k = 0; k < nv; k++) {
-        G.insert(0, 3 * k) = 1;
-        G.insert(1, 3 * k + 1) = 1;
-        G.insert(2, 3 * k + 2) = 1;
+        tripletList.emplace_back(0, 3 * k, 1.0);
+        tripletList.emplace_back(1, 3 * k + 1, 1.0);
+        tripletList.emplace_back(2, 3 * k + 2, 1.0);
 
-        G.insert(3, 3 * k + 1) = -(vertices(k, 2)); G.insert(3, 3 * k + 2) = (vertices(k, 1));
-        G.insert(4, 3 * k) = (vertices(k, 2)); G.insert(4, 3 * k + 2) = -(vertices(k, 0));
-        G.insert(5, 3 * k) = -(vertices(k, 1)); G.insert(5, 3 * k + 1) = (vertices(k, 0));
+        tripletList.emplace_back(3, 3 * k + 1, -(vertices(k, 2))); tripletList.emplace_back(3, 3 * k + 2, (vertices(k, 1)));
+        tripletList.emplace_back(4, 3 * k, vertices(k, 2)); tripletList.emplace_back(4, 3 * k + 2, -(vertices(k, 0)));
+        tripletList.emplace_back(5, 3 * k, -(vertices(k, 1))); tripletList.emplace_back(5, 3 * k + 1, (vertices(k, 0)));
     }
+    G.setFromTriplets(tripletList.begin(), tripletList.end());
+    G.makeCompressed();
     return G;
 }
 
@@ -207,8 +247,7 @@ double calculate_max_eigenvalue(SparseMatrix<double> K) {
 }
 
 Eigen::SparseMatrix<double> Calculate_Stresses(Eigen::MatrixXi tetrahedras, Eigen::MatrixXd vertices, Eigen::MatrixXd V, Eigen::MatrixXi F, Eigen::VectorXi new_2_Old,
-    VectorXd p, Eigen::SparseLU<Eigen::SparseMatrix<double>>& solver, int& intersect, double& log_V) {
-    double log_Volume = 0.0;
+    VectorXd p, Eigen::SparseLU<Eigen::SparseMatrix<double>>& solver, int& intersect) {
     int nv = vertices.rows();
     int n_sp = V.rows();
     int n_tet = tetrahedras.rows();
@@ -266,7 +305,6 @@ Eigen::SparseMatrix<double> Calculate_Stresses(Eigen::MatrixXi tetrahedras, Eige
             intersect = 1;
             break;
         }
-        log_Volume += log(Volume);
         for (int i = 0; i < 4; i++) {
             double b_i = algebraicCofactor(Lambda, i, 1);
             double c_i = algebraicCofactor(Lambda, i, 2);
@@ -285,7 +323,86 @@ Eigen::SparseMatrix<double> Calculate_Stresses(Eigen::MatrixXi tetrahedras, Eige
         }
     }
     sparse_Stress.makeCompressed();
-    log_V = log_Volume;
+    return sparse_Stress;
+}
+
+Eigen::SparseMatrix<double> Calculate_Stresses(Eigen::MatrixXi tetrahedras, Eigen::MatrixXd vertices, Eigen::MatrixXd V, Eigen::MatrixXi F, Eigen::VectorXi new_2_Old,
+    VectorXd p, Eigen::ConjugateGradient<Eigen::SparseMatrix<double>, Lower | Upper>& solver, int& intersect, VectorXd& u_back) {
+    int nv = vertices.rows();
+    int n_sp = V.rows();
+    int n_tet = tetrahedras.rows();
+    int n = 3 * nv;
+
+    Eigen::SparseMatrix<double> N = Build_N(nv, V, F, new_2_Old, nullptr);
+    Eigen::SparseMatrix<double> G = Build_G(nv, vertices, N, n_sp);
+    Eigen::MatrixXd GGT = G * G.transpose();
+    Eigen::MatrixXd GGT_inverse = GGT.inverse();
+    Eigen::SparseMatrix<double> sparse_GGT_inverse = GGT_inverse.sparseView();
+    Eigen::SparseMatrix<double> I(n_sp, n_sp);
+    for (int i = 0; i < n_sp; i++) {
+        I.insert(i, i) = 1.0;
+    }
+    //p = (I - G.transpose() * (sparse_GGT_inverse)*G) * p;
+
+    Eigen::VectorXd u(n + 6);
+    Eigen::VectorXd f(n);
+    //计算位移displacement
+    f = N * p;
+    f.conservativeResize(n + 6);
+    f[n] = 0.0; f[n + 1] = 0.0; f[n + 2] = 0.0; f[n + 3] = 0.0; f[n + 4] = 0.0; f[n + 5] = 0.0;
+    u = solver.solveWithGuess(f, u_back);
+    // 检查解是否成功
+    std::cout << "The norm of u is : " << u.norm() << std::endl;
+    u_back = u;
+    Eigen::SparseMatrix<double> sparse_Stress(n_tet * 6, 1);
+    Eigen::Matrix<double, 6, 1>S_tress_e;
+    Eigen::Matrix<double, 12, 1>ue;
+    Eigen::Matrix<double, 6, 6>D;
+    Eigen::Matrix<double, 6, 12>B; B.setZero();
+    D << (1 - mu), mu, mu, 0, 0, 0,
+        mu, (1 - mu), mu, 0, 0, 0,
+        mu, mu, (1 - mu), 0, 0, 0,
+        0, 0, 0, (1 - 2 * mu) / 2, 0, 0,
+        0, 0, 0, 0, (1 - 2 * mu) / 2, 0,
+        0, 0, 0, 0, 0, (1 - 2 * mu) / 2;
+    D *= E / ((1 + mu) * (1 - 2 * mu));
+    for (int k = 0; k < n_tet; k++) {
+        double p1_x, p1_y, p1_z, p2_x, p2_y, p2_z, p3_x, p3_y, p3_z, p4_x, p4_y, p4_z;
+        int t1, t2, t3, t4;
+        double a1, a2, a3, b1, b2, b3, c1, c2, c3;
+        Matrix<double, 4, 4> Lambda;
+        t1 = tetrahedras(k, 0); t2 = tetrahedras(k, 1); t3 = tetrahedras(k, 2); t4 = tetrahedras(k, 3);
+        p1_x = vertices(t1, 0); p1_y = vertices(t1, 1); p1_z = vertices(t1, 2);
+        p2_x = vertices(t2, 0); p2_y = vertices(t2, 1); p2_z = vertices(t2, 2);
+        p3_x = vertices(t3, 0); p3_y = vertices(t3, 1); p3_z = vertices(t3, 2);
+        p4_x = vertices(t4, 0); p4_y = vertices(t4, 1); p4_z = vertices(t4, 2);
+        Lambda << 1, p1_x, p1_y, p1_z,
+            1, p2_x, p2_y, p2_z,
+            1, p3_x, p3_y, p3_z,
+            1, p4_x, p4_y, p4_z;
+        double Volume = Lambda.determinant() / 6.0;
+        if (Volume < 0.0) {
+            intersect = 1;
+            break;
+        }
+        for (int i = 0; i < 4; i++) {
+            double b_i = algebraicCofactor(Lambda, i, 1);
+            double c_i = algebraicCofactor(Lambda, i, 2);
+            double d_i = algebraicCofactor(Lambda, i, 3);
+            B(0, 3 * i) = b_i; B(1, 3 * i + 1) = c_i; B(2, 3 * i + 2) = d_i;
+            B(3, 3 * i) = c_i; B(3, 3 * i + 1) = b_i; B(4, 3 * i + 1) = d_i; B(4, 3 * i + 2) = c_i; B(5, 3 * i) = d_i; B(5, 3 * i + 2) = b_i;
+        }
+        B /= 6.0 * Volume;
+        ue << u[t1 * 3], u[t1 * 3 + 1], u[t1 * 3 + 2],
+            u[t2 * 3], u[t2 * 3 + 1], u[t2 * 3 + 2],
+            u[t3 * 3], u[t3 * 3 + 1], u[t3 * 3 + 2],
+            u[t4 * 3], u[t4 * 3 + 1], u[t4 * 3 + 2];
+        S_tress_e = D * B * ue;
+        for (int stress_i = 0; stress_i < 6; stress_i++) {
+            sparse_Stress.coeffRef(6 * k + stress_i, 0) += S_tress_e(stress_i, 0);
+        }
+    }
+    sparse_Stress.makeCompressed();
     return sparse_Stress;
 }
 
@@ -318,7 +435,7 @@ double Calculate_O(int& notPositiveSemiDefinite, double t, Eigen::SparseMatrix<d
         if (det1 < 1e-3 || det2 < 1e-3)
         {
             notPositiveSemiDefinite = 1;
-            cout << "Invalid Guess s,t" << endl;
+            //cout << "Invalid Guess s,t" << endl;
             return -1e6;
         }
         if (!isPositiveSemiDefinite(mat1) || !isPositiveSemiDefinite(mat2)) {
@@ -330,7 +447,7 @@ double Calculate_O(int& notPositiveSemiDefinite, double t, Eigen::SparseMatrix<d
     }
     O += t;
     notPositiveSemiDefinite = 0;
-    cout << "Double || The value of O : " << O << "  t :" << t << endl;
+    //cout << "Double || The value of O : " << O << "  t :" << t << endl;
     return O;
 }
 
@@ -353,7 +470,7 @@ double Calculate_O_dt(double t, Eigen::SparseMatrix<double> stress, int n_tet, d
         det2 = mat2.determinant();
         if (det1 < 1e-3 || det2 < 1e-3)
         {
-            cout << "Invalid Guess s,t" << endl;
+            //cout << "Invalid Guess s,t" << endl;
             return -1e6;
         }
         if (!isPositiveSemiDefinite(mat1) || !isPositiveSemiDefinite(mat2)) {
@@ -492,6 +609,128 @@ SparseMatrix<CppAD::AD<double>> Build_N(int nv, const vector<CppAD::AD<double>>&
     return N;
 }
 
+int Stiffness_grad_id(int nv, const vector<CppAD::AD<double>> vertices, int n_tet, Eigen::MatrixXi tetrahedras, int id,
+    vector<int>& row_indices_output, vector<int>& col_indices_output, vector<double>& grad_K) {
+    // 遍历 K 的非零元素
+    auto START_TIME2 = std::chrono::high_resolution_clock::now();
+    vector<int>row_indices;
+    vector<int>col_indices;
+    vector<CppAD::AD<double>>K_AD_Vector;
+    vector<CppAD::AD<double>> verteces_id(3);
+    vector<double>verteces_id_s(3);
+
+    for (int i = 0; i < 3; i++) {
+        verteces_id[i] = vertices[3 * id + i];
+        verteces_id_s[i] = Value(vertices[3 * id + i]);
+    }
+    CppAD::Independent(verteces_id);
+    Eigen::SparseMatrix<CppAD::AD<double>> sparse_K(nv * 3, nv * 3);
+    Eigen::Matrix<CppAD::AD<double>, 6, 6>D;
+    Eigen::Matrix<CppAD::AD<double>, 6, 12>B; B.setZero();
+    Eigen::Matrix<CppAD::AD<double>, 12, 12>Ke;
+    D << (1 - mu), mu, mu, 0, 0, 0,
+        mu, (1 - mu), mu, 0, 0, 0,
+        mu, mu, (1 - mu), 0, 0, 0,
+        0, 0, 0, (1 - 2 * mu) / 2, 0, 0,
+        0, 0, 0, 0, (1 - 2 * mu) / 2, 0,
+        0, 0, 0, 0, 0, (1 - 2 * mu) / 2;
+    D *= E / ((1 + mu) * (1 - 2 * mu));
+    for (int k = 0; k < n_tet; k++) {
+        CppAD::AD<double> p1_x, p1_y, p1_z, p2_x, p2_y, p2_z, p3_x, p3_y, p3_z, p4_x, p4_y, p4_z;
+        int t1, t2, t3, t4;
+        int t_id;
+        CppAD::AD<double> a1, a2, a3, b1, b2, b3, c1, c2, c3;
+        Matrix<CppAD::AD<double>, 4, 4> Lambda;
+        t1 = tetrahedras(k, 0); t2 = tetrahedras(k, 1); t3 = tetrahedras(k, 2); t4 = tetrahedras(k, 3);
+        if ((t1 != id) && (t2 != id) && (t3 != id) && (t4 != id))
+            continue;
+        if (t1 == id) {
+            p1_x = verteces_id[0]; p1_y = verteces_id[1]; p1_z = verteces_id[2];
+        }
+        else {
+            p1_x = vertices[t1 * 3]; p1_y = vertices[t1 * 3 + 1]; p1_z = vertices[t1 * 3 + 2];
+        }
+        if (t2 == id) {
+            p2_x = verteces_id[0]; p2_y = verteces_id[1]; p2_z = verteces_id[2];
+        }
+        else {
+            p2_x = vertices[t2 * 3]; p2_y = vertices[t2 * 3 + 1]; p2_z = vertices[t2 * 3 + 2];
+        }
+        if (t3 == id) {
+            p3_x = verteces_id[0]; p3_y = verteces_id[1]; p3_z = verteces_id[2];
+        }
+        else {
+            p3_x = vertices[t3 * 3]; p3_y = vertices[t3 * 3 + 1]; p3_z = vertices[t3 * 3 + 2];
+        }
+        if (t4 == id) {
+            p4_x = verteces_id[0]; p4_y = verteces_id[1]; p4_z = verteces_id[2];
+        }
+        else {
+            p4_x = vertices[t4 * 3]; p4_y = vertices[t4 * 3 + 1]; p4_z = vertices[t4 * 3 + 2];
+        }
+        Lambda << 1, p1_x, p1_y, p1_z,
+            1, p2_x, p2_y, p2_z,
+            1, p3_x, p3_y, p3_z,
+            1, p4_x, p4_y, p4_z;
+        CppAD::AD<double> Volume = Lambda.determinant() / 6.0;
+        for (int i = 0; i < 4; i++) {
+            CppAD::AD<double> b_i = algebraicCofactor(Lambda, i, 1);
+            CppAD::AD<double> c_i = algebraicCofactor(Lambda, i, 2);
+            CppAD::AD<double> d_i = algebraicCofactor(Lambda, i, 3);
+            B(0, 3 * i) = b_i; B(1, 3 * i + 1) = c_i; B(2, 3 * i + 2) = d_i;
+            B(3, 3 * i) = c_i; B(3, 3 * i + 1) = b_i; B(4, 3 * i + 1) = d_i; B(4, 3 * i + 2) = c_i; B(5, 3 * i) = d_i; B(5, 3 * i + 2) = b_i;
+        }
+        B /= 6.0 * Volume;
+        Ke = B.transpose() * D * B * Volume;
+        int index[] = { 3 * t1, 3 * t1 + 1, 3 * t1 + 2,
+                        3 * t2, 3 * t2 + 1, 3 * t2 + 2,
+                        3 * t3, 3 * t3 + 1, 3 * t3 + 2,
+                        3 * t4, 3 * t4 + 1, 3 * t4 + 2 };
+        for (int j = 0; j < 12; j++)
+            for (int i = j; i < 12; i++) {
+                //sparse_K.coeffRef(0, index[i]) += 1.0;
+                if (index[i] >= index[j])
+                    sparse_K.coeffRef(index[i], index[j]) += Ke(i, j);
+                else
+                    sparse_K.coeffRef(index[j], index[i]) += Ke(j, i);
+            }
+    }
+    sparse_K.makeCompressed();
+    // 遍历 K 的非零元素
+    row_indices.clear(); col_indices.clear(); K_AD_Vector.clear();
+    for (int k = 0; k < sparse_K.outerSize(); ++k) {
+        for (Eigen::SparseMatrix<CppAD::AD<double>>::InnerIterator it(sparse_K, k); it; ++it) {
+            row_indices.push_back(it.row());// it.row()       // 非零元素的行索引
+            col_indices.push_back(it.col());// it.col()       // 非零元素的列索引
+            K_AD_Vector.push_back(CppAD::AD<double>(it.value()));// it.value()     // 非零元素的值
+        }
+    }
+    CppAD::ADFun<double> func(verteces_id, K_AD_Vector);    // 创建 ADFun 对象
+    vector<double>jac_K = func.Jacobian(verteces_id_s);
+    row_indices_output = row_indices;
+    col_indices_output = col_indices;
+    grad_K = jac_K;
+    return 1;
+}
+
+void grad_M_G_id(int id, vector<int>& row_indices_output, vector<int>& col_indices_output, vector<double>& grad_G) {
+    vector<int> row_indices;
+    vector<int> col_indices;
+    vector<double> jac_G;
+    row_indices.push_back(4); col_indices.push_back(3 * id + 2); jac_G.push_back(-1);
+    row_indices.push_back(5); col_indices.push_back(3 * id + 1); jac_G.push_back(1);
+
+    row_indices.push_back(3); col_indices.push_back(3 * id + 2); jac_G.push_back(1);
+    row_indices.push_back(5); col_indices.push_back(3 * id); jac_G.push_back(-1);
+
+    row_indices.push_back(3); col_indices.push_back(3 * id + 1); jac_G.push_back(-1);
+    row_indices.push_back(4); col_indices.push_back(3 * id); jac_G.push_back(1);
+
+    row_indices_output = row_indices;
+    col_indices_output = col_indices;
+    grad_G = jac_G;
+}
+
 
 
 VectorXd Calculate_sigma_A(int nv, Eigen::MatrixXd vertices, int n_tet, Eigen::MatrixXi tetrahedras, VectorXd u, double t) {
@@ -566,7 +805,7 @@ VectorXd Calculate_sigma_A(int nv, Eigen::MatrixXd vertices, int n_tet, Eigen::M
 
 
 double Calculate_Stresses_AD(Eigen::MatrixXi tetrahedras, Eigen::MatrixXd points, Eigen::MatrixXd V, Eigen::MatrixXi F, unordered_map<int, int> Old_2_new, Eigen::VectorXi index_sp, double t,
-    VectorXd p, vector<double>& grad_s, Eigen::SparseLU<Eigen::SparseMatrix<double>>& solver) {
+    VectorXd p, vector<double>& grad_s, Eigen::ConjugateGradient<Eigen::SparseMatrix<double>, Lower | Upper>& solver, Eigen::VectorXd& u_back) {
     int nv = points.rows();
     int n_sp = V.rows();
     int n_tet = tetrahedras.rows();
@@ -597,7 +836,9 @@ double Calculate_Stresses_AD(Eigen::MatrixXi tetrahedras, Eigen::MatrixXd points
     f = N * p;
     f.conservativeResize(n + 6);
     f[n] = 0.0; f[n + 1] = 0.0; f[n + 2] = 0.0; f[n + 3] = 0.0; f[n + 4] = 0.0; f[n + 5] = 0.0;
-    u = solver.solve(f);
+    //u = solver.solve(f);
+    u = solver.solveWithGuess(f, u_back);
+    u_back = u;
     // 检查解是否成功
     std::cout << "The norm of u is : " << u.norm() << std::endl;
     //-计算位移 u over -1
@@ -652,61 +893,9 @@ double Calculate_Stresses_AD(Eigen::MatrixXi tetrahedras, Eigen::MatrixXd points
             vertices_x[3 * i + j] = points(i, j);
         }
     }
-    for (int i = 0; i < n_sp; i++) {
-        int id = index_sp[i];
-        for (int j = 0; j < 3; j++) {
-            vertices_sp[3 * i + j] = CppAD::AD<double>(points(id, j));
-            vertices_sp_x[3 * i + j] = points(id, j);
-        }
-    }
     cout << "number of triangles: " << n_tri << endl;
     cout << "The number of vertices: " << nv << endl;
     cout << "The number of vertices on the surface: " << n_sp << endl;
-    auto START_TIME2 = std::chrono::high_resolution_clock::now();
-
-    //CppAD::Independent(vertices);
-    CppAD::Independent(vertices_sp);
-    for (int i = 0; i < n_sp; i++) {
-        int id = index_sp[i];
-        vertices[3 * id] = vertices_sp[3 * i]; vertices[3 * id + 1] = vertices_sp[3 * i + 1]; vertices[3 * id + 2] = vertices_sp[3 * i + 2];
-    }
-    Eigen::SparseMatrix<CppAD::AD<double>> K_AD = Build_stiffness_Matrix(nv, vertices, n_tet, tetrahedras);
-    // 遍历 K 的非零元素
-    row_indices.clear(); col_indices.clear(); K_AD_Vector.clear();
-    for (int k = 0; k < K_AD.outerSize(); ++k) {
-        for (Eigen::SparseMatrix<CppAD::AD<double>>::InnerIterator it(K_AD, k); it; ++it) {
-            row_indices.push_back(it.row());// it.row()       // 非零元素的行索引
-            col_indices.push_back(it.col());// it.col()       // 非零元素的列索引
-            K_AD_Vector.push_back(CppAD::AD<double>(it.value()));// it.value()     // 非零元素的值
-        }
-    }
-    CppAD::ADFun<double> func(vertices_sp, K_AD_Vector);    // 创建 ADFun 对象
-    jac_K = func.Jacobian(vertices_sp_x);
-    auto end_time9 = std::chrono::high_resolution_clock::now();
-    auto duration_Np9 = std::chrono::duration_cast<std::chrono::microseconds>(end_time9 - START_TIME2).count() / 1e6;
-    std::cout << "||------ The cost of calculating grad_K : " << duration_Np9 << " seconds ------||" << endl << endl;
-
-    //calculate grad_G
-    CppAD::Independent(vertices);
-    CppAD::Independent(vertices_sp);
-    for (int i = 0; i < n_sp; i++) {
-        int id = index_sp[i];
-        vertices[3 * id] = vertices_sp[3 * i]; vertices[3 * id + 1] = vertices_sp[3 * i + 1]; vertices[3 * id + 2] = vertices_sp[3 * i + 2];
-    }
-    G_AD = Build_M_G(nv, vertices);
-    G_row_indices.clear(); G_col_indices.clear(); G_AD_Vector.clear();
-    for (int k = 0; k < G_AD.outerSize(); ++k) {
-        for (Eigen::SparseMatrix<CppAD::AD<double>>::InnerIterator it(G_AD, k); it; ++it) {
-            G_row_indices.push_back(it.row());// it.row()       // 非零元素的行索引
-            G_col_indices.push_back(it.col());// it.col()       // 非零元素的列索引
-            G_AD_Vector.push_back(CppAD::AD<double>(it.value()));// it.value()     // 非零元素的值
-        }
-    }
-    CppAD::ADFun<double> G_func(vertices_sp, G_AD_Vector);    // 创建 ADFun 对象
-    jac_G = G_func.Jacobian(vertices_sp_x);
-    auto end_time12 = std::chrono::high_resolution_clock::now();
-    auto duration_Np12 = std::chrono::duration_cast<std::chrono::microseconds>(end_time12 - end_time9).count() / 1e6;
-    std::cout << "||------ The cost of calculating the grad_G : " << duration_Np12 << " seconds ------||" << endl << endl;
 
     D_ad << (1 - mu), mu, mu, 0, 0, 0,
         mu, (1 - mu), mu, 0, 0, 0,
@@ -804,6 +993,14 @@ double Calculate_Stresses_AD(Eigen::MatrixXi tetrahedras, Eigen::MatrixXd points
     }
     for (int s_i = 0; s_i < n_sp; s_i++) {
         int s_i_old = index_sp[s_i];
+        vector<int> row_indices;
+        vector<int> col_indices;
+        vector<double> grad_K;
+        vector<int> row_indices_G;
+        vector<int> col_indices_G;
+        vector<double> grad_G;
+        Stiffness_grad_id(nv, vertices, n_tet, tetrahedras, s_i_old, row_indices, col_indices, grad_K);
+        grad_M_G_id(s_i_old, row_indices_G, col_indices_G, grad_G);
         Vector3d normal; normal << Normal[3 * s_i_old], Normal[3 * s_i_old + 1], Normal[3 * s_i_old + 2];
         for (int s_i_cord = 0; s_i_cord < 3; s_i_cord++) {
             int s_i_old_i = 3 * s_i_old + s_i_cord;
@@ -825,29 +1022,29 @@ double Calculate_Stresses_AD(Eigen::MatrixXi tetrahedras, Eigen::MatrixXd points
             jac_N = N_s.Jacobian(s_k_x);
             for (int f_i = 0; f_i < 3 * nv; f_i++)
                 grad_f_s[f_i] = jac_N[f_i];
+
             grad_M.setZero();
-            int non_zero = K_AD_Vector.size();
-            //cout << "non_zero : "<<non_zero << endl;
-            for (int it = 0; it < non_zero; it++) {
-                //cout << "id : " << it * 3 * n_sp + s_i_i << " || it :" << it << " || s_i_i : " << s_i_i << endl;
-                if (jac_K[it * 3 * n_sp + s_i_i] != 0) {
-                    grad_M.insert(row_indices[it], col_indices[it]) = jac_K[it * 3 * n_sp + s_i_i];
-                }
-            }
-            //grad_M.makeCompressed();
-            non_zero = G_AD_Vector.size();
+            int non_zero = row_indices.size();
             for (int it = 0; it < non_zero; it++)
-                if (jac_G[it * 3 * n_sp + s_i_i] != 0) {
-                    grad_M.insert(G_row_indices[it] + n, G_col_indices[it]) = jac_G[it * 3 * n_sp + s_i_i];
-                    grad_M.insert(G_col_indices[it], G_row_indices[it] + n) = jac_G[it * 3 * n_sp + s_i_i];
+                if (grad_K[it * 3 + s_i_cord] != 0.0) {
+                    grad_M.insert(row_indices[it], col_indices[it]) = grad_K[it * 3 + s_i_cord];
+                    if (row_indices[it] != col_indices[it])
+                        grad_M.insert(col_indices[it], row_indices[it]) = grad_K[it * 3 + s_i_cord];
                 }
             grad_M.makeCompressed();
+            for (int it = 0; it < 2; it++) {
+                //   cout << "id :" << row_indices_G[2 * s_i_cord + it] + n << " , " << col_indices_G[2 * s_i_cord + it] << " : " << grad_G[2 * s_i_cord + it] << endl;
+                grad_M.insert(row_indices_G[2 * s_i_cord + it] + n, col_indices_G[2 * s_i_cord + it]) = grad_G[2 * s_i_cord + it];
+                grad_M.insert(col_indices_G[2 * s_i_cord + it], row_indices_G[2 * s_i_cord + it] + n) = grad_G[2 * s_i_cord + it];
+            }
+            grad_M.makeCompressed();
+
             double part2 = O_A.transpose() * grad_f_s;
             double part3 = O_A.transpose() * grad_M * O_B;
             grad_O_s[s_i_old_i] += O_mu * (part2 - part3);
             //grad_O_s[s_i_old_i] += -jac_V[s_i_i];
             //grad_O_s[s_i_old_i] += O_mu * (part2);
-            vertices[s_i_old_i] = CppAD::AD<double>(points(s_i_old, s_i_cord));
+            //vertices[s_i_old_i] = CppAD::AD<double>(points(s_i_old, s_i_cord));
         }
         Vector3d grad_p; grad_p << grad_O_s[3 * s_i_old], grad_O_s[3 * s_i_old + 1], grad_O_s[3 * s_i_old + 2];
         grad_p = (grad_p.dot(normal) / normal.dot(normal)) * normal;
@@ -855,9 +1052,9 @@ double Calculate_Stresses_AD(Eigen::MatrixXi tetrahedras, Eigen::MatrixXd points
         grad_norm += grad_p.norm();
     }
     grad_s = grad_O_s;
-    //auto end_time_stress = std::chrono::high_resolution_clock::now();
-    //auto duration = std::chrono::duration_cast<std::chrono::seconds>(end_time_stress - start_time_AD).count();
-    //std::cout << "|| The cost of d_stress/d_s : " << duration << " seconds" << endl << endl << endl;
+    auto end_time_stress = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::seconds>(end_time_stress - start_time_AD).count();
+    std::cout << "|| The cost of stress grad : " << duration << " seconds" << endl << endl << endl;
     cout << "The norm of grad : " << grad_norm << endl;
     return grad_norm;
 }
@@ -884,7 +1081,7 @@ double Stresses_AD_Filter(Eigen::MatrixXi tetrahedras, SparseMatrix<double> spar
         if (stress[t] > max_stress)
             max_stress = stress[t];
     }
-    cout << "max stress : " << max_stress << endl;
+    //cout << "max stress : " << max_stress << endl;
     for (int t = 0; t < n_sp; t++) {
         int id = new_2_Old[t];
         if (stress[t] < max_stress * 0.1) {
@@ -897,168 +1094,22 @@ double Stresses_AD_Filter(Eigen::MatrixXi tetrahedras, SparseMatrix<double> spar
 
 }
 
-double stress_grad(Eigen::MatrixXd points, Eigen::MatrixXi triangles, Eigen::MatrixXi tetrahedras, Eigen::MatrixXd V, Eigen::MatrixXi F,
-    unordered_map<int, int> Old_2_new, Eigen::VectorXi new_2_Old, Eigen::VectorXd& grad, double& Max_stress, int& successful) {
-    int iter = 0;
-    int last_smooth_iter = 0;
-    double grad_start_norm = 0.0;
-    double O = 0.0;
-
-    Eigen::SparseMatrix<double> N;
-    Eigen::SparseMatrix<double> G;
-    Eigen::SparseMatrix<double> M_G;
-    Eigen::SparseMatrix<double> K;
-    Eigen::VectorXd Area;
-    int np = points.rows();
-    int n_tet = tetrahedras.rows();
-    int n = 3 * np;
-    int n_sp = V.rows();
-    Calculate_Area(V, F, Area);
-
-    double* new_points;
-    int* new_triangles;
-
-    //转变为double的SparseMatrix
-    K = Build_stiffness_Matrix(np, points, n_tet, tetrahedras);
-    N = Build_N(np, V, F, new_2_Old, nullptr);
-    G = Build_G(np, points, N, n_sp);        //计算G
-    M_G = Build_M_G(np, points);        //计算G
-    Eigen::SparseMatrix<double> M = merge_matrix(K, M_G);
-    Eigen::SparseLU<Eigen::SparseMatrix<double>> solver_LU;
-    //计算K的最大特征值.
-    double MaxEigenvalue = calculate_max_eigenvalue(K);
-    cout << "n_sp:" << n_sp << endl;
-    Eigen::SparseMatrix<double> I(n_sp, n_sp);
-    for (int i = 0; i < n_sp; i++) {
-        I.insert(i, i) = 1.0;
-    }
-    Eigen::MatrixXd GGT = G * G.transpose();
-    Eigen::MatrixXd GGT_inverse = GGT.inverse();
-    //cout << G << endl;
-    //cout << GGT_inverse << endl;
-    Eigen::SparseMatrix<double> sparse_GGT_inverse = GGT_inverse.sparseView();
-    Eigen::SparseMatrix<double> GEP_matrix_sparse = ((I - G.transpose() * (sparse_GGT_inverse)*G).transpose() *
-        N.transpose() * K * N *
-        (I - G.transpose() * (sparse_GGT_inverse)*G) +
-        G.transpose() * MaxEigenvalue * G
-        );
-    solver_LU.compute(M);
-    if (solver_LU.info() != Eigen::Success) {
-        std::cerr << "Decomposition failed!" << std::endl;
-        throw std::runtime_error("The inverse of K cannot be computed !");
-    }
-    Eigen::SparseMatrix<double> A(n, n);
-    for (int i = 0; i < n_sp; i++) {
-        int id = new_2_Old[i];
-        A.insert(3 * id, 3 * id) = Area[i];
-        A.insert(3 * id + 1, 3 * id + 1) = Area[i];
-        A.insert(3 * id + 2, 3 * id + 2) = Area[i];
-    }
-    Eigen::SparseMatrix<double> P = I - G.transpose() * (sparse_GGT_inverse)*G;
-    Eigen::SparseMatrix<double> matrix_B = N.transpose() * A * N;
-    SparseSymMatProd<double> opA(GEP_matrix_sparse);
-    SparseCholesky<double>  Bop(matrix_B);
-    //std::cout << GEP_matrix_sparse << std::endl;
-    //std::cout << "matrix_B : "<<std::endl<< matrix_B << std::endl;
-
-    // Construct generalized eigen solver object, requesting the largest three generalized eigenvalues
-    SymGEigsSolver<SparseSymMatProd<double>, SparseCholesky<double>, GEigsMode::Cholesky>
-        geigs(opA, Bop, 3, 24);
-    // Initialize and compute
-
-    Eigen::VectorXd evalues;
-    Eigen::MatrixXd evecs_GEP;
-    try {
-        geigs.init();
-
-        int nconv = geigs.compute(SortRule::SmallestAlge);
-        //std::cout << nconv << std::endl;
-    }
-    catch (const std::runtime_error& e) {
-        std::cerr << "TridiagEigen: eigen decomposition failed." << std::endl;
-        successful = 0;
-        return 0.0;
-    }
-
-    if (geigs.info() == CompInfo::Successful)
-    {
-        evalues = geigs.eigenvalues();
-        evecs_GEP = geigs.eigenvectors();
-    }
-    else {
-        std::cerr << "Decomposition failed!" << std::endl;
-        successful = 0;
-        return 0.0;
-        //throw std::runtime_error("GEP cannot be computed !");
-    }
-    VectorXd p, u, f, y;
-    double max_energy = 0.0; int max_energy_p_i = 0;
-    for (int p_i = 0; p_i < 3; p_i++) {
-        p = evecs_GEP.col(p_i);
-        Eigen::VectorXd y = P * p;
-        p = y;
-        f = N * p;
-        f.conservativeResize(n + 6);
-        f[n] = 0.0; f[n + 1] = 0.0; f[n + 2] = 0.0; f[n + 3] = 0.0; f[n + 4] = 0.0; f[n + 5] = 0.0;
-        u = solver_LU.solve(f);
-        double energy = u.transpose() * f;
-        if (energy > max_energy) {
-            max_energy = energy;
-            max_energy_p_i = p_i;
-        }
-    }
-    p = evecs_GEP.col(max_energy_p_i);
-    VectorXd p_stress(n_sp);
-    p_stress = evecs_GEP.col(max_energy_p_i);
-    y = (I - G.transpose() * (sparse_GGT_inverse)*G) * p;
-    VectorXd Gp = G * y;
-    Gp = G * p;
-    p = y;
-    f = N * p;
-    std::cout << "模长(f)：" << f.norm() << endl;
-    f.conservativeResize(n + 6);
-    f[n] = 0.0; f[n + 1] = 0.0; f[n + 2] = 0.0; f[n + 3] = 0.0; f[n + 4] = 0.0; f[n + 5] = 0.0;
-    u = solver_LU.solve(f);
-    cout << "Energy E : " << u.transpose() * f << endl;
-
-
-    //calculate stress grad
-    bool loop = true, loop_t = true, loop_s = true;
+double calculate_t(SparseMatrix<double> sparse_Stress, int n_tet, double& O_stress) {
+    bool loop_t = true, loop_s = true;
     double t = 1e4;
     double threshold = 1e-15, gamma = 0.5;
-    int intersect = 0;
-    double log_V;
-    double smooth_E;
-    Eigen::SparseMatrix<double> sparse_Stress = Calculate_Stresses(tetrahedras, points, V, F, new_2_Old, p_stress, solver_LU, intersect, log_V);
-    std::cout << sparse_Stress.coeffRef(0, 0) << std::endl;
-    double max_tet_stress = 0.0;
-    for (int i = 0; i < n_tet; i++) {
-        for (int pos = 0; pos < 3; pos++) {
-            max_tet_stress = max(max_tet_stress, abs(sparse_Stress.coeffRef(6 * i + pos, 0)));
-        }
-    }
-    Max_stress = max_tet_stress;
-    smooth_E = 0.0;
     int notPositiveSemiDefinite = 0;
-    O = Calculate_O(notPositiveSemiDefinite, t, sparse_Stress, n_tet);
+    double O = Calculate_O(notPositiveSemiDefinite, t, sparse_Stress, n_tet);
     while (notPositiveSemiDefinite) {
         std::cout << "Invalid Initial!!" << endl;
         t *= 2.0;
-        smooth_E = 0.0;
         O = Calculate_O(notPositiveSemiDefinite, t, sparse_Stress, n_tet);
         std::cout << O << endl;
     }
-    if (intersect) {
-        successful = 0;
-        cout << "There is a intersection!" << endl;
-        return 0.0;
-    }
     double last_O = O, last_O_t = O, last_O_s = O;
-
     int loop_t_time = 0, loop_s_time = 0;
     double alpha = 0.001;
     auto start_iter = std::chrono::high_resolution_clock::now();
-    intersect = 0;
     //optimize t 
     loop_t = true;
     cout << "--------------------Optimize t: ---------------------------------------------------------------------------------" << endl;
@@ -1093,16 +1144,282 @@ double stress_grad(Eigen::MatrixXd points, Eigen::MatrixXi triangles, Eigen::Mat
                 alpha_t *= gamma;
             }
         }
-        cout << "O:" << O << " The max of O_t : " << maxVal << "  t : " << t << " new_ton_delta:" << new_ton_delta << " |Alpha:" << alpha_t << endl;
+        //cout << "O:" << O << " The max of O_t : " << maxVal << "  t : " << t << " new_ton_delta:" << new_ton_delta << " |Alpha:" << alpha_t << endl;
     }
     //optimize s
     cout << "-------------------Optimize s: ----------Optimize s: ----------------- Optimize s --------------------------------------------------" << endl;
     cout << "The value of O after optimization on t : " << last_O_t << endl;
     cout << "The value of O t : " << t << endl;
+    O_stress = O;
+    return t;
+}
+
+int update_pressure(int n_sp, int n, SparseMatrix<double> K, SparseMatrix<double> N, SparseMatrix<double> G, Eigen::VectorXd Area, Eigen::VectorXi new_2_Old,
+    VectorXd& pressure, Eigen::ConjugateGradient<Eigen::SparseMatrix<double>, Lower | Upper>& solver, int& successful, Eigen::VectorXd& u_back) {
+    //计算K的最大特征值.
+    double MaxEigenvalue = calculate_max_eigenvalue(K);
+    Eigen::SparseMatrix<double> I(n_sp, n_sp);
+    for (int i = 0; i < n_sp; i++) {
+        I.insert(i, i) = 1.0;
+    }
+    Eigen::MatrixXd GGT = G * G.transpose();
+    Eigen::MatrixXd GGT_inverse = GGT.inverse();
+    //cout << G << endl;
+    //cout << GGT_inverse << endl;
+    Eigen::SparseMatrix<double> sparse_GGT_inverse = GGT_inverse.sparseView();
+    Eigen::SparseMatrix<double> GEP_matrix_sparse = ((I - G.transpose() * (sparse_GGT_inverse)*G).transpose() *
+        N.transpose() * K * N *
+        (I - G.transpose() * (sparse_GGT_inverse)*G) +
+        G.transpose() * MaxEigenvalue * G
+        );
+
+    Eigen::SparseMatrix<double> A(n, n);
+    for (int i = 0; i < n_sp; i++) {
+        int id = new_2_Old[i];
+        A.insert(3 * id, 3 * id) = Area[i];
+        A.insert(3 * id + 1, 3 * id + 1) = Area[i];
+        A.insert(3 * id + 2, 3 * id + 2) = Area[i];
+    }
+    Eigen::SparseMatrix<double> P = I - G.transpose() * (sparse_GGT_inverse)*G;
+    Eigen::SparseMatrix<double> matrix_B = N.transpose() * A * N;
+    SparseSymMatProd<double> opA(GEP_matrix_sparse);
+    SparseCholesky<double>  Bop(matrix_B);
+
+    // Construct generalized eigen solver object, requesting the largest three generalized eigenvalues
+    SymGEigsSolver<SparseSymMatProd<double>, SparseCholesky<double>, GEigsMode::Cholesky>
+        geigs(opA, Bop, 3, 24);
+    // Initialize and compute
+
+    Eigen::VectorXd evalues;
+    Eigen::MatrixXd evecs_GEP;
+    try {
+        geigs.init();
+
+        int nconv = geigs.compute(SortRule::SmallestAlge);
+        //std::cout << nconv << std::endl;
+    }
+    catch (const std::runtime_error& e) {
+        std::cerr << "TridiagEigen: eigen decomposition failed." << std::endl;
+        successful = 0;
+        return 0;
+    }
+
+    if (geigs.info() == CompInfo::Successful)
+    {
+        evalues = geigs.eigenvalues();
+        evecs_GEP = geigs.eigenvectors();
+    }
+    else {
+        std::cerr << "Decomposition failed!" << std::endl;
+        successful = 0;
+        return 0;
+        //throw std::runtime_error("GEP cannot be computed !");
+    }
+    VectorXd p, u, f, y;
+    double max_energy = 0.0; int max_energy_p_i = 0;
+    for (int p_i = 0; p_i < 3; p_i++) {
+        p = evecs_GEP.col(p_i);
+        Eigen::VectorXd y = P * p;
+        p = y;
+        f = N * p;
+        f.conservativeResize(n + 6);
+        f[n] = 0.0; f[n + 1] = 0.0; f[n + 2] = 0.0; f[n + 3] = 0.0; f[n + 4] = 0.0; f[n + 5] = 0.0;
+        u = solver.solve(f);
+        double energy = u.transpose() * f;
+        if (energy > max_energy) {
+            max_energy = energy;
+            max_energy_p_i = p_i;
+        }
+    }
+    p = evecs_GEP.col(max_energy_p_i);
+    VectorXd p_stress(n_sp);
+    p_stress = evecs_GEP.col(max_energy_p_i);
+    //y = (I - G.transpose() * (sparse_GGT_inverse)*G) * p;
+    //VectorXd Gp = G * y;
+    //Gp = G * p;
+    //p = y;
+    f = N * p;
+    std::cout << "模长(f)：" << f.norm() << endl;
+    f.conservativeResize(n + 6);
+    f[n] = 0.0; f[n + 1] = 0.0; f[n + 2] = 0.0; f[n + 3] = 0.0; f[n + 4] = 0.0; f[n + 5] = 0.0;
+    u = solver.solve(f);
+    pressure = p;
+    successful = 1;
+    u_back = u;
+    cout << "Energy E : " << u.transpose() * f << endl;
+    return 1;
+}
+
+
+int calculate_pressure(Eigen::MatrixXd points, Eigen::MatrixXi tetrahedras, Eigen::MatrixXd V, Eigen::MatrixXi F,
+    Eigen::VectorXi new_2_Old, int& successful, Eigen::VectorXd& p, Eigen::VectorXd& u) {
+    int iter = 0;
+    int last_smooth_iter = 0;
+    double grad_start_norm = 0.0;
+
+    Eigen::SparseMatrix<double> N;
+    Eigen::SparseMatrix<double> G;
+    Eigen::SparseMatrix<double> M_G;
+    Eigen::SparseMatrix<double> K;
+    Eigen::VectorXd Area;
+    int np = points.rows();
+    int n_tet = tetrahedras.rows();
+    int n = 3 * np;
+    int n_sp = V.rows();
+    Calculate_Area(V, F, Area);
+    cout << "n_sp:" << n_sp << endl;
+    double* new_points;
+    int* new_triangles;
+
+    //转变为double的SparseMatrix
+    K = Build_stiffness_Matrix(np, points, n_tet, tetrahedras);
+    N = Build_N(np, V, F, new_2_Old, nullptr);
+    G = Build_G(np, points, N, n_sp);        //计算G
+    M_G = Build_M_G(np, points);        //计算G
+    Eigen::SparseMatrix<double> M = merge_matrix(K, M_G);
+    Eigen::ConjugateGradient<Eigen::SparseMatrix<double>, Lower | Upper>cg;
+    cg.compute(M);
+    cg.setTolerance(1e-16);
+    //Eigen::SparseLU<Eigen::SparseMatrix<double>> solver_LU;
+    //solver_LU.compute(M);
+    if (cg.info() != Eigen::Success) {
+        std::cerr << "Decomposition failed!" << std::endl;
+        throw std::runtime_error("The inverse of K cannot be computed !");
+    }
+
+    Eigen::VectorXd p_stress;
+    update_pressure(n_sp, n, K, N, G, Area, new_2_Old, p_stress, cg, successful, u);
+    if (!successful)
+        return 0;
+    successful = 1;
+    p = p_stress;
+    return 1;
+}
+
+double update_t(Eigen::MatrixXd points, Eigen::MatrixXi tetrahedras, Eigen::MatrixXd V, Eigen::MatrixXi F,
+    Eigen::VectorXi new_2_Old, double& Max_stress, int& successful, Eigen::VectorXd p, Eigen::VectorXd& u_back) {
+    int iter = 0;
+    int last_smooth_iter = 0;
+    double grad_start_norm = 0.0;
+
+    Eigen::SparseMatrix<double> N;
+    Eigen::SparseMatrix<double> G;
+    Eigen::SparseMatrix<double> M_G;
+    Eigen::SparseMatrix<double> K;
+    int np = points.rows();
+    int n_tet = tetrahedras.rows();
+    int n = 3 * np;
+    int n_sp = V.rows();
+    double* new_points;
+    int* new_triangles;
+    //转变为double的SparseMatrix
+    K = Build_stiffness_Matrix(np, points, n_tet, tetrahedras);
+    N = Build_N(np, V, F, new_2_Old, nullptr);
+    G = Build_G(np, points, N, n_sp);        //计算G
+    M_G = Build_M_G(np, points);        //计算G
+    Eigen::SparseMatrix<double> M = merge_matrix(K, M_G);
+
+    Eigen::ConjugateGradient<Eigen::SparseMatrix<double>, Lower | Upper>cg;
+    //ConjugateGradient<SparseMatrix<double>, Lower | Upper> cg
+    cg.compute(M);
+    cg.setTolerance(1e-16);
+    if (cg.info() != Eigen::Success) {
+        std::cerr << "Decomposition failed!" << std::endl;
+        throw std::runtime_error("The inverse of K cannot be computed !");
+    }
+    //calculate stress grad
+    int intersect = 0;
+    double smooth_E;
+    Eigen::SparseMatrix<double> sparse_Stress = Calculate_Stresses(tetrahedras, points, V, F, new_2_Old, p, cg, intersect, u_back);
+    std::cout << sparse_Stress.coeffRef(0, 0) << std::endl;
+    if (intersect) {
+        successful = 0;
+        cout << "There is a intersection!" << endl;
+        return 0.0;
+    }
+    double max_tet_stress = 0.0;
+    for (int i = 0; i < n_tet; i++) {
+        for (int pos = 0; pos < 3; pos++) {
+            max_tet_stress = max(max_tet_stress, abs(sparse_Stress.coeffRef(6 * i + pos, 0)));
+        }
+    }
+    Max_stress = max_tet_stress;
+    successful = 1;
+    double O;
+    double t = calculate_t(sparse_Stress, n_tet, O);
+    return t;
+}
+
+
+double stress_grad(Eigen::MatrixXd points, Eigen::MatrixXi triangles, Eigen::MatrixXi tetrahedras, Eigen::MatrixXd V, Eigen::MatrixXi F,
+    unordered_map<int, int> Old_2_new, Eigen::VectorXi new_2_Old, Eigen::VectorXd& grad, double& Max_stress, int& successful, int update_p,
+    Eigen::VectorXd p, Eigen::VectorXd& u) {
+    int iter = 0;
+    int last_smooth_iter = 0;
+    double grad_start_norm = 0.0;
+
+    Eigen::SparseMatrix<double> N;
+    Eigen::SparseMatrix<double> G;
+    Eigen::SparseMatrix<double> M_G;
+    Eigen::SparseMatrix<double> K;
+    Eigen::VectorXd Area;
+    int np = points.rows();
+    int n_tet = tetrahedras.rows();
+    int n = 3 * np;
+    int n_sp = V.rows();
+    Calculate_Area(V, F, Area);
+    cout << "n_sp:" << n_sp << endl;
+    double* new_points;
+    int* new_triangles;
+
+    //转变为double的SparseMatrix
+    K = Build_stiffness_Matrix(np, points, n_tet, tetrahedras);
+    N = Build_N(np, V, F, new_2_Old, nullptr);
+    G = Build_G(np, points, N, n_sp);        //计算G
+    M_G = Build_M_G(np, points);        //计算G
+    Eigen::SparseMatrix<double> M = merge_matrix(K, M_G);
+    //Eigen::SparseLU<Eigen::SparseMatrix<double>> solver_LU;
+    //solver_LU.compute(M);
+    //if (solver_LU.info() != Eigen::Success) {
+    //    std::cerr << "Decomposition failed!" << std::endl;
+    //    throw std::runtime_error("The inverse of K cannot be computed !");
+    //}
+    Eigen::ConjugateGradient<Eigen::SparseMatrix<double>, Lower | Upper>cg;
+    //ConjugateGradient<SparseMatrix<double>, Lower | Upper> cg
+    cg.compute(M);
+    cg.setTolerance(1e-16);
+    if (cg.info() != Eigen::Success) {
+        std::cerr << "Decomposition failed!" << std::endl;
+        throw std::runtime_error("The inverse of K cannot be computed !");
+    }
+
+    Eigen::VectorXd p_stress;
+    p_stress = p;
+    //calculate stress grad
+    int intersect = 0;
+    double smooth_E;
+    Eigen::SparseMatrix<double> sparse_Stress = Calculate_Stresses(tetrahedras, points, V, F, new_2_Old, p_stress, cg, intersect, u);
+    std::cout << sparse_Stress.coeffRef(0, 0) << std::endl;
+    if (intersect) {
+        successful = 0;
+        cout << "There is a intersection!" << endl;
+        return 0.0;
+    }
+    double max_tet_stress = 0.0;
+    for (int i = 0; i < n_tet; i++) {
+        for (int pos = 0; pos < 3; pos++) {
+            max_tet_stress = max(max_tet_stress, abs(sparse_Stress.coeffRef(6 * i + pos, 0)));
+        }
+    }
+    Max_stress = max_tet_stress;
+    smooth_E = 0.0;
+    std::cout << "max_tet_stress : " << max_tet_stress << std::endl;
+    double O;
+    double t = calculate_t(sparse_Stress, n_tet, O);
 
     vector<double> grad_s;
 
-    double grad_new_norm = Calculate_Stresses_AD(tetrahedras, points, V, F, Old_2_new, new_2_Old, t, p_stress, grad_s, solver_LU);
+    double grad_new_norm = Calculate_Stresses_AD(tetrahedras, points, V, F, Old_2_new, new_2_Old, t, p_stress, grad_s, cg, u);
 
     grad.resize(n); grad.setZero();
     for (int i = 0; i < n; i++)

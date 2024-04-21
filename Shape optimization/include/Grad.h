@@ -42,10 +42,13 @@ using namespace Spectra;
 //typedef Eigen::Matrix<CppAD::AD<double>, 3, 1> Vector3d_AD;
 
 double stress_grad(Eigen::MatrixXd points, Eigen::MatrixXi triangles, Eigen::MatrixXi tetrahedras, Eigen::MatrixXd V, Eigen::MatrixXi F,
-    unordered_map<int, int> Old_2_new, Eigen::VectorXi new_2_Old,Eigen::VectorXd &grad);
+    unordered_map<int, int> Old_2_new, Eigen::VectorXi new_2_Old, Eigen::VectorXd& grad);
 double stress_grad(Eigen::MatrixXd points, Eigen::MatrixXi triangles, Eigen::MatrixXi tetrahedras, Eigen::MatrixXd V, Eigen::MatrixXi F,
-    unordered_map<int, int> Old_2_new, Eigen::VectorXi new_2_Old, Eigen::VectorXd& grad, double& Max_stress, int& successful);
-void extract_surface(Eigen::MatrixXd points, Eigen::MatrixXi triangles, unordered_map<int, int>& Old_2_new, Eigen::MatrixXd& V, Eigen::MatrixXi& F , Eigen::VectorXi& new_2_Old);
+    unordered_map<int, int> Old_2_new, Eigen::VectorXi new_2_Old, Eigen::VectorXd& grad, double& Max_stress, int& successful, int update_p,
+    Eigen::VectorXd p, Eigen::VectorXd& u);
+double stress_grad(Eigen::MatrixXd points, Eigen::MatrixXi triangles, Eigen::MatrixXi tetrahedras, Eigen::MatrixXd V, Eigen::MatrixXi F,
+    unordered_map<int, int> Old_2_new, Eigen::VectorXi new_2_Old, Eigen::VectorXd& grad, double& Max_stress, int& successful, int update_p, Eigen::VectorXd p);
+void extract_surface(Eigen::MatrixXd points, Eigen::MatrixXi triangles, unordered_map<int, int>& Old_2_new, Eigen::MatrixXd& V, Eigen::MatrixXi& F, Eigen::VectorXi& new_2_Old);
 void Calculate_Area(Eigen::MatrixXd V, Eigen::MatrixXi F, Eigen::VectorXd& Area);
 double algebraicCofactor(Eigen::Matrix< double, 4, 4>& matrix, int i, int j);
 Eigen::SparseMatrix<double> Build_stiffness_Matrix(int nv, Eigen::MatrixXd vertices, int n_tet, Eigen::MatrixXi tetrahedras);
@@ -55,13 +58,34 @@ SparseMatrix<double> Build_M_G(int nv, Eigen::MatrixXd vertices);
 double calculate_max_eigenvalue(SparseMatrix<double> K);
 Eigen::SparseMatrix<double> merge_matrix(Eigen::SparseMatrix<double> K, Eigen::SparseMatrix<double> G);
 Eigen::SparseMatrix<double> Calculate_Stresses(Eigen::MatrixXi tetrahedras, Eigen::MatrixXd vertices, Eigen::MatrixXd V, Eigen::MatrixXi F, Eigen::VectorXi new_2_Old,
-    VectorXd p, Eigen::SparseLU<Eigen::SparseMatrix<double>>& solver, int& intersect, double& log_V);
+    VectorXd p, Eigen::SparseLU<Eigen::SparseMatrix<double>>& solver, int& intersect);
+Eigen::SparseMatrix<double> Calculate_Stresses(Eigen::MatrixXi tetrahedras, Eigen::MatrixXd vertices, Eigen::MatrixXd V, Eigen::MatrixXi F, Eigen::VectorXi new_2_Old,
+    VectorXd p, Eigen::ConjugateGradient<Eigen::SparseMatrix<double>, Lower | Upper>& solver, int& intersect, VectorXd& u_back);
+
+void grad_M_G_id(int id, vector<int>& row_indices_output, vector<int>& col_indices_output, vector<double>& grad_G);
+int Stiffness_grad_id(int nv, const vector<CppAD::AD<double>> vertices, int n_tet, Eigen::MatrixXi tetrahedras, int id,
+    vector<int>& row_indices_output, vector<int>& col_indices_output, vector<double>& grad_K);
 double Calculate_O(double t, Eigen::SparseMatrix<double> stress, int n_tet);
 double Calculate_O(int& notPositiveSemiDefinite, double t, Eigen::SparseMatrix<double> stress, int n_tet);
 double Calculate_O_dt(double t, Eigen::SparseMatrix<double> stress, int n_tet, double& DO_DT, double& DO_DT2);
 
+int calculate_pressure(Eigen::MatrixXd points, Eigen::MatrixXi tetrahedras, Eigen::MatrixXd V, Eigen::MatrixXi F,
+    Eigen::VectorXi new_2_Old, int& successful, Eigen::VectorXd& p, Eigen::VectorXd& u);
+
+//int calculate_pressure(Eigen::MatrixXd points, Eigen::MatrixXi tetrahedras, Eigen::MatrixXd V, Eigen::MatrixXi F,
+//    Eigen::VectorXi new_2_Old, int& successful, Eigen::VectorXd& p);
+double calculate_t(SparseMatrix<double> sparse_Stress, int n_tet, double& O_stress);
+double update_t(Eigen::MatrixXd points, Eigen::MatrixXi tetrahedras, Eigen::MatrixXd V, Eigen::MatrixXi F,
+    Eigen::VectorXi new_2_Old, double& Max_stress, int& successful, Eigen::VectorXd p, Eigen::VectorXd& u_back);
+
+//int update_pressure(int n_sp, int n, SparseMatrix<double> K, SparseMatrix<double> N, SparseMatrix<double> G, Eigen::VectorXd Area, Eigen::VectorXi new_2_Old,
+//    VectorXd& pressure, Eigen::SparseLU<Eigen::SparseMatrix<double>>& solver, int& successful);
+//int update_pressure(int n_sp, int n, SparseMatrix<double> K, SparseMatrix<double> N, SparseMatrix<double> G, Eigen::VectorXd Area, Eigen::VectorXi new_2_Old,
+//    VectorXd& pressure, Eigen::SparseLU<Eigen::SparseMatrix<double>>& solver, int& successful, Eigen::VectorXd& u_back);
+int update_pressure(int n_sp, int n, SparseMatrix<double> K, SparseMatrix<double> N, SparseMatrix<double> G, Eigen::VectorXd Area, Eigen::VectorXi new_2_Old,
+    VectorXd& pressure, Eigen::ConjugateGradient<Eigen::SparseMatrix<double>, Lower | Upper>& solver, int& successful, Eigen::VectorXd& u_back);
 double Calculate_Stresses_AD(Eigen::MatrixXi tetrahedras, Eigen::MatrixXd points, Eigen::MatrixXd V, Eigen::MatrixXi F, Eigen::VectorXi index_sp, double t,
-    VectorXd p, vector<double>& grad_s, Eigen::SparseLU<Eigen::SparseMatrix<double>>& solver);
+    VectorXd p, vector<double>& grad_s, Eigen::ConjugateGradient<Eigen::SparseMatrix<double>, Lower | Upper>& solver);
 VectorXd Calculate_sigma_A(int nv, Eigen::MatrixXd vertices, int n_tet, Eigen::MatrixXi tetrahedras, VectorXd u, double t);
 CppAD::AD<double> algebraicCofactor(Eigen::Matrix< CppAD::AD<double>, 4, 4>& matrix, int i, int j);
 

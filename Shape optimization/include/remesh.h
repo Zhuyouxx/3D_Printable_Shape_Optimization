@@ -13,6 +13,9 @@
 #include <Eigen/Core>
 #include <unordered_set>
 #include <unordered_map>
+#include <igl/copyleft/tetgen/tetrahedralize.h>
+#include <igl/readOBJ.h>
+#include <igl/writeOBJ.h>
 using namespace std;
 /** Include the mmg3d library hader file */
 // if the header file is in the "include" directory
@@ -34,3 +37,8 @@ int read_mesh(MMG5_pMesh& mmgMesh_out, MMG5_pSol& mmgSol_out, char* filename, Ei
 void Calculate_Area(Eigen::MatrixXd V, Eigen::MatrixXi F, Eigen::VectorXd& Area);
 void extract_surface(Eigen::MatrixXd points, Eigen::MatrixXi triangles, unordered_map<int, int>& Old_2_new,
     Eigen::MatrixXd& V, Eigen::MatrixXi& F, Eigen::VectorXi& new_2_Old);
+
+double get_worst_quality(MMG5_pMesh mmgMesh, MMG5_pSol mmgSol);
+double get_worst_quality(MMG5_pMesh mmgMesh, MMG5_pSol mmgSol, Eigen::MatrixXd points, Eigen::MatrixXi triangles, Eigen::MatrixXi tetrahedras);
+//int tetgen(const std::string& filename, const std::string& file_out, string options, Eigen::MatrixXd& TV, Eigen::MatrixXi& TT, Eigen::MatrixXi& TF);
+double avg_edge_length(Eigen::MatrixXd V, Eigen::MatrixXi F);
